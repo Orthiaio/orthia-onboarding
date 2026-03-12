@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  outputFileTracingExcludes: {
+    "*": ["**/@swc/core*", "**/@esbuild*"],
+  },
 };
 
 export default nextConfig;
