@@ -35,7 +35,9 @@
       "Bash(cmd /c \"echo %PATH%\")",
       "Bash(powershell -Command \"Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
       "Bash(powershell -Command \"$env:Path\")",
-      "Bash(powershell -Command \"Write-Output $env:Path\")"
+      "Bash(powershell -Command \"Write-Output $env:Path\")",
+      "Bash(cat /d/orthia-onboarding/src/app/onboard/[slug]/page.tsx)",
+      "Bash(powershell -Command \"Get-Item ''D:\\\\orthia-onboarding\\\\public\\\\logo.png'' | Select-Object Length, LastWriteTime\")"
     ]
   }
 }

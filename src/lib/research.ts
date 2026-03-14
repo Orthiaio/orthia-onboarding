@@ -12,7 +12,7 @@ export function generateSlug(): string {
 
 export const RESEARCH_PROMPT = (clinicName: string) => `You are researching a dental/orthodontic practice called "${clinicName}" to pre-fill an onboarding form.
 
-Search thoroughly using their website, Google Business Profile, social media pages, review sites (Yelp, Healthgrades, Zocdoc), and any other public sources. If you find multiple clinics with the same or similar name, return the most likely match and include the full address so the user can verify.
+Search thoroughly using their website, Google Business Profile, social media pages, review sites (Yelp, Healthgrades, Zocdoc), and any other public sources. Return the most likely match as the primary result, but also list any other clinics you found with a similar name.
 
 Extract as much of the following as you can find:
 
@@ -48,6 +48,9 @@ Extract as much of the following as you can find:
 
 **Confidence:**
 - confidence: How confident you are this is the right practice. "high" = exact match found with clear identifying info, "medium" = likely match but some ambiguity, "low" = best guess among multiple similar results, "none" = could not find any matching practice at all
+
+**Alternative Matches:**
+- alternativeMatches: If you found other clinics with similar names, list up to 5 as an array of objects with { name, address, phone, website }. Only include this if there were genuinely other practices that could match the query. Use null if there was only one clear match.
 
 Respond with ONLY a valid JSON object, no other text. Use null for any field you cannot find. Include the confidence field.`;
 

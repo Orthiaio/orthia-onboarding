@@ -316,6 +316,42 @@ export default function AdminPage() {
             </button>
           </div>
           {generateError && <p className="mt-2 text-sm text-red-600">{generateError}</p>}
+
+          {/* Alternative Matches */}
+          {rd?.alternativeMatches && Array.isArray(rd.alternativeMatches) && (rd.alternativeMatches as Array<Record<string, string>>).length > 0 && (
+            <div className="mt-4 border-t pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Other matches found</p>
+              <div className="space-y-2">
+                {(rd.alternativeMatches as Array<Record<string, string>>).map((alt, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      const specificName = alt.name + (alt.address ? `, ${alt.address}` : "");
+                      setClinicName(specificName);
+                      setResearchResult(null);
+                      setGenerateError("");
+                      // Auto-trigger research with the specific name
+                      setGenerating(true);
+                      fetch("/api/research", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ clinicName: specificName, step: "research" }),
+                      })
+                        .then((res) => res.json())
+                        .then((result) => setResearchResult(result))
+                        .catch(() => setGenerateError("Failed to research alternative"))
+                        .finally(() => setGenerating(false));
+                    }}
+                    disabled={generating}
+                    className="w-full text-left rounded border px-3 py-2 hover:bg-gray-50 transition disabled:opacity-50"
+                  >
+                    <p className="text-sm font-medium text-gray-900">{alt.name}</p>
+                    {alt.address && <p className="text-xs text-gray-500">{alt.address}</p>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -324,6 +360,42 @@ export default function AdminPage() {
         <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5">
           <h3 className="font-semibold text-gray-900">Couldn&apos;t find &ldquo;{clinicName}&rdquo;</h3>
           <p className="mt-1 text-sm text-gray-600">No matching practice found. Try a more specific name or create a blank form.</p>
+
+          {/* Show alternatives even when primary match not found */}
+          {rd?.alternativeMatches && Array.isArray(rd.alternativeMatches) && (rd.alternativeMatches as Array<Record<string, string>>).length > 0 && (
+            <div className="mt-4 border-t border-amber-200 pt-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">Did you mean one of these?</p>
+              <div className="space-y-2">
+                {(rd.alternativeMatches as Array<Record<string, string>>).map((alt, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      const specificName = alt.name + (alt.address ? `, ${alt.address}` : "");
+                      setClinicName(specificName);
+                      setResearchResult(null);
+                      setGenerateError("");
+                      setGenerating(true);
+                      fetch("/api/research", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ clinicName: specificName, step: "research" }),
+                      })
+                        .then((res) => res.json())
+                        .then((result) => setResearchResult(result))
+                        .catch(() => setGenerateError("Failed to research alternative"))
+                        .finally(() => setGenerating(false));
+                    }}
+                    disabled={generating}
+                    className="w-full text-left rounded border border-amber-200 bg-white px-3 py-2 hover:bg-amber-50 transition disabled:opacity-50"
+                  >
+                    <p className="text-sm font-medium text-gray-900">{alt.name}</p>
+                    {alt.address && <p className="text-xs text-gray-500">{alt.address}</p>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-4 flex gap-2">
             <button onClick={handleRetry} disabled={confirming} className="rounded border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-white disabled:opacity-50">
               Try again

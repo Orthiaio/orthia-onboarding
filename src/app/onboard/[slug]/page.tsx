@@ -631,10 +631,10 @@ function OnboardForm() {
       </div>
 
       {/* Sticky Progress Bar */}
-      <div className="sticky top-0 z-10 border-b bg-white/95 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-6 py-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-gray-500">Section {activeSection} of 11</p>
+      <div className="sticky top-0 z-20 border-b bg-white shadow-sm">
+        <div className="mx-auto max-w-3xl px-6 py-2.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs font-semibold text-gray-700">Section {activeSection} of 11</p>
             <div className="flex gap-1">
               {Array.from({ length: 11 }, (_, i) => (
                 <button
@@ -644,13 +644,19 @@ function OnboardForm() {
                     i + 1 === activeSection
                       ? "w-6 bg-blue-600"
                       : i + 1 < activeSection
-                        ? "w-2 bg-blue-300"
+                        ? "w-2 bg-blue-400"
                         : "w-2 bg-gray-200"
                   }`}
                   aria-label={`Go to section ${i + 1}`}
                 />
               ))}
             </div>
+          </div>
+          <div className="h-1 w-full rounded-full bg-gray-100">
+            <div
+              className="h-1 rounded-full bg-blue-600 transition-all duration-300"
+              style={{ width: `${Math.round((activeSection / 11) * 100)}%` }}
+            />
           </div>
         </div>
       </div>

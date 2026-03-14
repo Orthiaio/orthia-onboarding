@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "Orthia Onboarding",
   description: "Clinic onboarding portal",
   icons: {
-    icon: "/logo.png",
+    icon: { url: "/logo.png", type: "image/png" },
     apple: "/logo.png",
   },
 };
