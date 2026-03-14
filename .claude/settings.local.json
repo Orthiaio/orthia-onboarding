@@ -23,7 +23,19 @@
       "Bash(where node:*)",
       "Bash(where npm:*)",
       "Bash(find /d/orthia-onboarding -type f -name *admin*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(git -C D:orthia-onboarding log --oneline -5)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(where npx:*)",
+      "Bash(where.exe npm.cmd)",
+      "Bash(dir \"C:\\\\Program Files\\\\nodejs\")",
+      "Bash(dir \"%APPDATA%\\\\npm\")",
+      "Bash(dir \"%LOCALAPPDATA%\\\\fnm\")",
+      "Bash(dir \"%USERPROFILE%\\\\.nvm\")",
+      "Bash(cmd /c \"echo %PATH%\")",
+      "Bash(powershell -Command \"Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell -Command \"$env:Path\")",
+      "Bash(powershell -Command \"Write-Output $env:Path\")"
     ]
   }
 }
