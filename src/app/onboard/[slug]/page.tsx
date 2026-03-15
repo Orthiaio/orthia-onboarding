@@ -678,7 +678,7 @@ function OnboardForm() {
           <p className="mt-1 text-gray-500">Please complete all sections below. Pre-filled information can be edited.</p>
         </div>
 
-        <form ref={formRef} onSubmit={handleSubmit} className={`space-y-10 ${isAdminView && submitted ? "pointer-events-none opacity-75" : ""}`}
+        <form ref={formRef} onSubmit={handleSubmit} className={`space-y-10 ${isAdminView && submitted ? "pointer-events-none opacity-75" : ""}`}>
 
           {/* Section 1: Basic Practice Information */}
           <section className="rounded-xl border bg-white p-6 shadow-sm">
