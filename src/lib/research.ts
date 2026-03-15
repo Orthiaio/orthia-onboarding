@@ -73,7 +73,7 @@ export async function researchClinic(clinicName: string): Promise<ResearchResult
   try {
     response = await client.responses.create({
       model: "gpt-4o",
-      tools: [{ type: "web_search_preview" }],
+      tools: [{ type: "web_search" as const }],
       input: RESEARCH_PROMPT(clinicName),
     });
   } catch (err: unknown) {
