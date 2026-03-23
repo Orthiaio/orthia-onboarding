@@ -64,6 +64,9 @@ interface ApptTypeConfig {
   startTime: string;
   endTime: string;
   duration: string;
+  rescheduleWindow: string;
+  allowedChairs: string;
+  urgentIfUnavailable: boolean | null;
 }
 
 function SectionHeader({ number, title }: { number: number; title: string }) {
@@ -186,16 +189,16 @@ function OnboardForm() {
   const [apptTypes, setApptTypes] = useState<Record<string, ApptTypeConfig>>(() => {
     const t: Record<string, ApptTypeConfig> = {};
     APPOINTMENT_TYPES.forEach(a => {
-      t[a] = { enabled: a === "New Patient Consult", days: [...DAYS.slice(0, 5)], startTime: "09:00", endTime: "17:00", duration: "60" };
+      t[a] = { enabled: a === "New Patient Consult", days: [...DAYS.slice(0, 5)], startTime: "09:00", endTime: "17:00", duration: "60", rescheduleWindow: "", allowedChairs: "", urgentIfUnavailable: null };
     });
     return t;
   });
   const [otherApptType, setOtherApptType] = useState("");
+  const [mainProvider, setMainProvider] = useState("");
   const [allowedProviders, setAllowedProviders] = useState("");
   const [ageRestrictions, setAgeRestrictions] = useState("");
   const [minRescheduleHours, setMinRescheduleHours] = useState("");
   const [minCancelHours, setMinCancelHours] = useState("");
-  const [urgentReviewTask, setUrgentReviewTask] = useState<boolean | null>(null);
 
   // Intake
   const [intakeFields, setIntakeFields] = useState<string[]>(["Patient Full Name", "Date of Birth", "Phone", "Email"]);
@@ -270,8 +273,8 @@ function OnboardForm() {
           multiLocation, additionalLocations, parkingNotes, buildingAccess,
           timezone, doctorNames, pointOfContact, billingContact, emergencyContact,
           schedulingContact, clinicHours, bookingScope, apptTypes, otherApptType,
-          allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
-          urgentReviewTask, intakeFields, otherIntakeFields, chiefConcernRequired,
+          mainProvider, allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
+          intakeFields, otherIntakeFields, chiefConcernRequired,
           bookWithoutInsurance, emergencyActions, wordsToAvoid, wordsToUse,
           humorAllowed, lunchStart, lunchEnd, wantsInsurance, npi, providerFirstName,
           providerLastName, orgLegalName, voiceGender, languages, otherLanguage,
@@ -311,13 +314,22 @@ function OnboardForm() {
       if (d.schedulingContact) setSchedulingContact(d.schedulingContact);
       if (d.clinicHours) setClinicHours(d.clinicHours);
       if (d.bookingScope) setBookingScope(d.bookingScope);
-      if (d.apptTypes) setApptTypes(d.apptTypes);
+      if (d.apptTypes) {
+        const loaded = d.apptTypes as Record<string, ApptTypeConfig>;
+        setApptTypes(prev => {
+          const merged: Record<string, ApptTypeConfig> = { ...prev };
+          for (const key of Object.keys(loaded)) {
+            merged[key] = { ...merged[key], rescheduleWindow: "", allowedChairs: "", urgentIfUnavailable: null, ...loaded[key] };
+          }
+          return merged;
+        });
+      }
       if (d.otherApptType) setOtherApptType(d.otherApptType);
+      if (d.mainProvider) setMainProvider(d.mainProvider);
       if (d.allowedProviders) setAllowedProviders(d.allowedProviders);
       if (d.ageRestrictions) setAgeRestrictions(d.ageRestrictions);
       if (d.minRescheduleHours) setMinRescheduleHours(d.minRescheduleHours);
       if (d.minCancelHours) setMinCancelHours(d.minCancelHours);
-      if (d.urgentReviewTask !== undefined) setUrgentReviewTask(d.urgentReviewTask);
       if (d.intakeFields) setIntakeFields(d.intakeFields);
       if (d.otherIntakeFields) setOtherIntakeFields(d.otherIntakeFields);
       if (d.chiefConcernRequired !== undefined) setChiefConcernRequired(d.chiefConcernRequired);
@@ -408,13 +420,22 @@ function OnboardForm() {
           if (fd.schedulingContact) setSchedulingContact(fd.schedulingContact as string);
           if (fd.clinicHours) setClinicHours(fd.clinicHours as ClinicHours);
           if (fd.bookingScope) setBookingScope(fd.bookingScope as string);
-          if (fd.apptTypes) setApptTypes(fd.apptTypes as Record<string, ApptTypeConfig>);
+          if (fd.apptTypes) {
+            const loaded = fd.apptTypes as Record<string, ApptTypeConfig>;
+            setApptTypes(prev => {
+              const merged: Record<string, ApptTypeConfig> = { ...prev };
+              for (const key of Object.keys(loaded)) {
+                merged[key] = { ...merged[key], rescheduleWindow: "", allowedChairs: "", urgentIfUnavailable: null, ...loaded[key] };
+              }
+              return merged;
+            });
+          }
           if (fd.otherApptType) setOtherApptType(fd.otherApptType as string);
+          if (fd.mainProvider) setMainProvider(fd.mainProvider as string);
           if (fd.allowedProviders) setAllowedProviders(fd.allowedProviders as string);
           if (fd.ageRestrictions) setAgeRestrictions(fd.ageRestrictions as string);
           if (fd.minRescheduleHours) setMinRescheduleHours(fd.minRescheduleHours as string);
           if (fd.minCancelHours) setMinCancelHours(fd.minCancelHours as string);
-          if (fd.urgentReviewTask !== undefined) setUrgentReviewTask(fd.urgentReviewTask as boolean);
           if (fd.intakeFields) setIntakeFields(fd.intakeFields as string[]);
           if (fd.otherIntakeFields) setOtherIntakeFields(fd.otherIntakeFields as string);
           if (fd.chiefConcernRequired !== undefined) setChiefConcernRequired(fd.chiefConcernRequired as boolean);
@@ -491,8 +512,8 @@ function OnboardForm() {
       address, multiLocation, additionalLocations, parkingNotes, buildingAccess,
       timezone, doctorNames, pointOfContact, billingContact, emergencyContact,
       schedulingContact, clinicHours, bookingScope, apptTypes, otherApptType,
-      allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
-      urgentReviewTask, intakeFields, otherIntakeFields, chiefConcernRequired,
+      mainProvider, allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
+      intakeFields, otherIntakeFields, chiefConcernRequired,
       bookWithoutInsurance, emergencyActions, wordsToAvoid, wordsToUse,
       humorAllowed, lunchStart, lunchEnd, wantsInsurance, npi, providerFirstName,
       providerLastName, orgLegalName, voiceGender, languages, otherLanguage,
@@ -794,6 +815,10 @@ function OnboardForm() {
                 <p className="mt-1 text-xs text-blue-600">You can start with just new patients. Existing patient booking can be configured later.</p>
               </Field>
 
+              <Field label="Main Provider for Booking Appointments">
+                <input type="text" value={mainProvider} onChange={e => setMainProvider(e.target.value)} placeholder="e.g., Dr. Smith" className={inputCls} />
+              </Field>
+
               {bookingScope === "new_and_existing" && (
                 <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4">
                   <p className="mb-3 text-sm font-medium text-gray-700">Select appointment types Orthia can book:</p>
@@ -810,8 +835,8 @@ function OnboardForm() {
                           <span className="font-medium">{type}</span>
                         </label>
                         {apptTypes[type]?.enabled && (
-                          <div className="ml-6 mt-2 grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-4">
-                            <div className="sm:col-span-2">
+                          <div className="ml-6 mt-2 grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-6">
+                            <div className="sm:col-span-3">
                               <label className="mb-1 block text-xs text-gray-500">Allowed Days</label>
                               <div className="flex flex-wrap gap-1">
                                 {DAYS.map(d => (
@@ -825,7 +850,7 @@ function OnboardForm() {
                                 ))}
                               </div>
                             </div>
-                            <div>
+                            <div className="sm:col-span-2">
                               <label className="mb-1 block text-xs text-gray-500">Time Range</label>
                               <div className="flex items-center gap-1">
                                 <input type="time" value={apptTypes[type].startTime} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], startTime: e.target.value } }))} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
@@ -833,9 +858,24 @@ function OnboardForm() {
                                 <input type="time" value={apptTypes[type].endTime} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], endTime: e.target.value } }))} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
                               </div>
                             </div>
-                            <div>
+                            <div className="sm:col-span-1">
                               <label className="mb-1 block text-xs text-gray-500">Duration (min)</label>
                               <input type="number" value={apptTypes[type].duration} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], duration: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" min="5" step="5" />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="mb-1 block text-xs text-gray-500">Reschedule Window (days)</label>
+                              <input type="number" value={apptTypes[type].rescheduleWindow} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], rescheduleWindow: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 7" min="1" />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="mb-1 block text-xs text-gray-500">Allowed Chairs</label>
+                              <input type="text" value={apptTypes[type].allowedChairs} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], allowedChairs: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="Leave blank if no specific chair" />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="mb-1 block text-xs text-gray-500">Urgent task if unavailable?</label>
+                              <div className="flex gap-1">
+                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], urgentIfUnavailable: true } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].urgentIfUnavailable === true ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Yes</button>
+                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], urgentIfUnavailable: false } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].urgentIfUnavailable === false ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>No</button>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -862,7 +902,6 @@ function OnboardForm() {
                   <input type="number" value={minCancelHours} onChange={e => setMinCancelHours(e.target.value)} placeholder="e.g., 24" className={inputCls} />
                 </Field>
               </div>
-              <YesNo label="If same appointment type is unavailable within 10 days, create urgent review task instead of booking?" value={urgentReviewTask} onChange={setUrgentReviewTask} />
             </div>
           </section>
 
