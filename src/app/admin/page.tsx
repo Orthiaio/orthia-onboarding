@@ -202,6 +202,128 @@ export default function AdminPage() {
     }
   }
 
+  function handleDownload(s: Submission) {
+    const fd = (s.form_data || {}) as Record<string, unknown>;
+    const line = (label: string, value: unknown) => {
+      if (value === null || value === undefined || value === "") return "";
+      return `- **${label}:** ${String(value)}\n`;
+    };
+    const section = (title: string, content: string) => {
+      const trimmed = content.trim();
+      return trimmed ? `## ${title}\n\n${trimmed}\n\n` : "";
+    };
+
+    // Format appointment types
+    let apptSection = "";
+    const apptTypes = fd.apptTypes as Record<string, Record<string, unknown>> | undefined;
+    if (apptTypes) {
+      for (const [name, cfg] of Object.entries(apptTypes)) {
+        if (!cfg?.enabled) continue;
+        apptSection += `#### ${name}\n`;
+        if (Array.isArray(cfg.days) && cfg.days.length > 0) apptSection += `- Allowed Days: ${cfg.days.join(", ")}\n`;
+        if (cfg.startTime && cfg.endTime) apptSection += `- Time Range: ${cfg.startTime} - ${cfg.endTime}\n`;
+        if (cfg.duration) apptSection += `- Duration: ${cfg.duration} min\n`;
+        if (cfg.rescheduleWindow) apptSection += `- Reschedule Window: ${cfg.rescheduleWindow} days\n`;
+        if (cfg.allowedChairs) apptSection += `- Allowed Chairs: ${cfg.allowedChairs}\n`;
+        if (cfg.urgentIfUnavailable !== null && cfg.urgentIfUnavailable !== undefined) apptSection += `- Urgent Task if Unavailable: ${cfg.urgentIfUnavailable ? "Yes" : "No"}\n`;
+        apptSection += "\n";
+      }
+    }
+
+    // Format languages
+    const langs = fd.languages as Record<string, boolean> | undefined;
+    const langList = langs ? Object.entries(langs).filter(([, v]) => v).map(([k]) => k).join(", ") : "";
+
+    // Format intake fields
+    const intake = fd.intakeFields as Record<string, boolean> | undefined;
+    const intakeList = intake ? Object.entries(intake).filter(([, v]) => v).map(([k]) => k).join(", ") : "";
+
+    const md = `# ${s.practice_name} — Onboarding Configuration
+
+${section("Practice Information",
+  line("Practice Name", s.practice_name) +
+  line("DBA Name", s.dba_name || fd.dbaName) +
+  line("Office Phone", s.office_phone) +
+  line("Office Email", s.office_email || fd.officeEmail) +
+  line("Website", s.website) +
+  line("Address", fd.address) +
+  line("Timezone", fd.timezone) +
+  line("PMS", s.pms) +
+  line("PMS Version", fd.pmsVersion) +
+  line("Multi-Location", fd.multiLocation ? "Yes" : "No") +
+  line("Additional Locations", fd.additionalLocations) +
+  line("Parking Notes", fd.parkingNotes) +
+  line("Building Access", fd.buildingAccess)
+)}${section("Contacts",
+  line("Primary Contact", s.contact_name) +
+  line("Contact Role", s.contact_role) +
+  line("Contact Email", s.email) +
+  line("Contact Phone", s.phone) +
+  line("Point of Contact", fd.pointOfContact) +
+  line("Billing Contact", fd.billingContact) +
+  line("Emergency Contact", fd.emergencyContact) +
+  line("Scheduling Contact", fd.schedulingContact)
+)}${section("Doctors & Providers",
+  line("Doctor Names", fd.doctorNames) +
+  line("Main Provider for Booking", fd.mainProvider) +
+  line("Allowed Providers", fd.allowedProviders)
+)}${section("Clinic Hours",
+  line("Hours", fd.clinicHours) +
+  line("Lunch Start", fd.lunchStart) +
+  line("Lunch End", fd.lunchEnd)
+)}${section("Availability & Scheduling",
+  line("Booking Scope", fd.bookingScope) +
+  line("Age Restrictions", fd.ageRestrictions) +
+  line("Min Hours to Reschedule", fd.minRescheduleHours) +
+  line("Min Hours to Cancel", fd.minCancelHours) +
+  (apptSection ? `### Appointment Types\n\n${apptSection}` : "") +
+  line("Other Appointment Type", fd.otherApptType)
+)}${section("Patient Intake",
+  line("Required Intake Fields", intakeList) +
+  line("Other Intake Fields", fd.otherIntakeFields) +
+  line("Chief Concern Required", fd.chiefConcernRequired === true ? "Yes" : fd.chiefConcernRequired === false ? "No" : "") +
+  line("Forms Needed", fd.formsNeeded) +
+  line("Referral Requirements", fd.referralRequirements)
+)}${section("Call Handling & Voice",
+  line("Voice Gender", fd.voiceGender) +
+  line("Languages", langList) +
+  line("Other Language", fd.otherLanguage) +
+  line("Personality", fd.personality) +
+  line("Tone", fd.tone) +
+  line("Words to Avoid", fd.wordsToAvoid) +
+  line("Words to Use", fd.wordsToUse) +
+  line("Emergency Actions", fd.emergencyActions)
+)}${section("Insurance & Billing",
+  line("Wants Insurance Verification", fd.wantsInsurance === true ? "Yes" : fd.wantsInsurance === false ? "No" : "") +
+  line("NPI", fd.npi) +
+  line("Provider First Name", fd.providerFirstName) +
+  line("Provider Last Name", fd.providerLastName) +
+  line("Organization Legal Name", fd.orgLegalName) +
+  line("Book Without Insurance", fd.bookWithoutInsurance === true ? "Yes" : fd.bookWithoutInsurance === false ? "No" : "") +
+  line("Insurance Not Accepted", fd.insuranceNotAccepted) +
+  line("Financing Options", fd.financingOptions) +
+  line("Consultation Price", fd.consultationPrice) +
+  line("Payment Methods", fd.paymentMethods)
+)}${section("FAQs & Policies",
+  line("Common Questions", fd.commonQuestions) +
+  line("Retainer Process", fd.retainerProcess) +
+  line("Braces/Aligner FAQs", fd.bracesAlignerFaqs) +
+  line("Adult/Child FAQs", fd.adultChildFaqs) +
+  line("Missed Appointment Policy", fd.missedApptPolicy) +
+  line("Cancellation Policy", fd.cancellationPolicy) +
+  line("Late Arrival Policy", fd.lateArrivalPolicy) +
+  line("School Excuse Policy", fd.schoolExcusePolicy)
+)}`;
+
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${s.practice_name.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-")}-onboarding.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (!authenticated) {
     return (
       <main className="flex min-h-screen items-center justify-center p-4">
@@ -469,6 +591,12 @@ export default function AdminPage() {
                         className="text-gray-500 hover:text-gray-700 hover:underline"
                       >
                         Copy
+                      </button>
+                      <button
+                        onClick={() => handleDownload(s)}
+                        className="text-green-600 hover:text-green-800 hover:underline"
+                      >
+                        Download
                       </button>
                       <button
                         onClick={() => handleDelete(s.id, s.practice_name)}
