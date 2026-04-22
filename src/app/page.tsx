@@ -119,12 +119,20 @@ export default function Home() {
               Orthia <span className="font-light text-blue-200">AI</span>
             </span>
           </a>
-          <a
-            href="/admin"
-            className="text-sm font-medium text-white/70 transition hover:text-white"
-          >
-            Admin
-          </a>
+          <div className="flex items-center gap-6">
+            <a
+              href="/admin"
+              className="text-sm font-medium text-white/70 transition hover:text-white"
+            >
+              Admin
+            </a>
+            <a
+              href="/team"
+              className="text-sm font-medium text-white/70 transition hover:text-white"
+            >
+              Team
+            </a>
+          </div>
         </div>
       </nav>
 
