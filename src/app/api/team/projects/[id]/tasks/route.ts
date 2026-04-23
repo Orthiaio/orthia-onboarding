@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import { logActivity } from "@/lib/team/activity";
 import type { Priority, Project, Status, Task, TaskType } from "@/lib/team/types";
 
@@ -67,7 +68,7 @@ export async function GET(
   }
 
   const { data, error } = await q.order("position", { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ tasks: data, project });
 }
 

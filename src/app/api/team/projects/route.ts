@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 
 export async function GET(req: NextRequest) {
   const auth = await requireUser(req);
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
     .eq("organization_id", user.organization_id)
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ projects: data });
 }
 
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     if (error.code === "23505") {
       return NextResponse.json({ error: "A project with that key already exists" }, { status: 409 });
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   }
   return NextResponse.json({ project: data });
 }

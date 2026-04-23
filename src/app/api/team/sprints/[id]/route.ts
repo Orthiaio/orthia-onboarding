@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import type { Sprint } from "@/lib/team/types";
 
 async function loadSprintInOrg(sprintId: number, orgId: number) {
@@ -57,7 +58,7 @@ export async function PATCH(
     .eq("id", sprint.id)
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ sprint: data });
 }
 
@@ -80,6 +81,6 @@ export async function DELETE(
   // Move the sprint's tasks back to the backlog (sprint_id = null)
   await teamDb.from("tt_tasks").update({ sprint_id: null }).eq("sprint_id", sprint.id);
   const { error } = await teamDb.from("tt_sprints").delete().eq("id", sprint.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return new NextResponse(null, { status: 204 });
 }

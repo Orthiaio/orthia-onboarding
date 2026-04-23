@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import type { Project } from "@/lib/team/types";
 
 async function getProjectInOrg(id: number, organizationId: number): Promise<Project | null> {
@@ -54,7 +55,7 @@ export async function PATCH(
     .eq("id", project.id)
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ project: data });
 }
 
@@ -74,6 +75,6 @@ export async function DELETE(
     .from("tt_projects")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", project.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return new NextResponse(null, { status: 204 });
 }

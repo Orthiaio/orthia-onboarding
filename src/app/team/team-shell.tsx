@@ -34,6 +34,7 @@ export default function TeamShell({
   const me = useMe();
   const [unread, setUnread] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [setupNeeded, setSetupNeeded] = useState<string | null>(null);
   const [notifs, setNotifs] = useState<
     Array<{
       id: number;
@@ -59,6 +60,17 @@ export default function TeamShell({
     load();
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
+  }, [me?.user]);
+
+  useEffect(() => {
+    if (!me?.user) return;
+    fetch("/api/team/diag")
+      .then((r) => r.json())
+      .then((d: { ok: boolean; next?: string }) => {
+        if (!d.ok && d.next) setSetupNeeded(d.next);
+        else setSetupNeeded(null);
+      })
+      .catch(() => {});
   }, [me?.user]);
 
   useEffect(() => {
@@ -98,6 +110,26 @@ export default function TeamShell({
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
+      {setupNeeded && (
+        <div className="border-b border-red-200 bg-red-50 px-6 py-2.5 text-sm text-red-800">
+          <div className="mx-auto flex max-w-7xl items-start justify-between gap-3">
+            <div>
+              <strong className="font-semibold">Setup required:</strong> {setupNeeded}{" "}
+              <span className="text-red-700/80">
+                — some features won&apos;t work until this is fixed.
+              </span>
+            </div>
+            <a
+              href="/api/team/diag"
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 whitespace-nowrap rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+            >
+              View diagnostics →
+            </a>
+          </div>
+        </div>
+      )}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-6">

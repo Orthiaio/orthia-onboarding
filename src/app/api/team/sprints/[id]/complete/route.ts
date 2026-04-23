@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import type { Sprint } from "@/lib/team/types";
 
 /**
@@ -70,6 +71,6 @@ export async function POST(
     .eq("id", sprint.id)
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ sprint: data });
 }

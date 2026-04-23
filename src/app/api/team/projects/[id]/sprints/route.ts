@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import type { Project } from "@/lib/team/types";
 
 async function getProject(id: number, orgId: number): Promise<Project | null> {
@@ -30,7 +31,7 @@ export async function GET(
     .select("*")
     .eq("project_id", project.id)
     .order("position", { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ sprints: data });
 }
 
@@ -70,6 +71,6 @@ export async function POST(
     })
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ sprint: data });
 }

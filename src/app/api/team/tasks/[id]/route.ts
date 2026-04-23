@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import { logActivity } from "@/lib/team/activity";
 import type { Priority, Task, TaskType } from "@/lib/team/types";
 
@@ -226,7 +227,7 @@ export async function PATCH(
     .eq("id", task.id)
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return NextResponse.json({ task: data });
 }
 
@@ -248,6 +249,6 @@ export async function DELETE(
     .from("tt_tasks")
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", task.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: describeDbError(error) }, { status: 500 });
   return new NextResponse(null, { status: 204 });
 }
