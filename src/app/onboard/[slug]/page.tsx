@@ -86,11 +86,33 @@ interface Closure {
 interface AdditionalLocation {
   id: string;
   label: string;
+
+  // Address & contact
   address: string;
   phone: string;
   email: string;
+  timezone: string;
   parkingNotes: string;
   buildingAccess: string;
+
+  // Hours
+  clinicHours: ClinicHours;
+  upcomingClosures: Closure[];
+  lunchHours: LunchConfig;
+
+  // Scheduling rules
+  bookingScope: string;
+  mainProvider: string;
+  allowedProviders: string;
+  ageRestrictions: string;
+  apptTypes: Record<string, ApptTypeConfig>;
+  otherApptType: string;
+
+  // PMS
+  pmsName: string;
+  pmsVersion: string;
+
+  // Freeform
   notes: string;
 }
 
@@ -149,6 +171,43 @@ function defaultLunchHours(): LunchConfig {
   return h;
 }
 
+function defaultClinicHours(): ClinicHours {
+  const h: ClinicHours = {};
+  DAYS.forEach(d => { h[d] = { open: "09:00", close: "17:00", closed: d === "Saturday" || d === "Sunday" }; });
+  return h;
+}
+
+function defaultApptTypes(): Record<string, ApptTypeConfig> {
+  const t: Record<string, ApptTypeConfig> = {};
+  APPOINTMENT_TYPES.forEach(a => {
+    t[a] = {
+      enabled: a === "New Patient Consult",
+      days: [...DAYS.slice(0, 5)],
+      startTime: "09:00",
+      endTime: "17:00",
+      duration: "60",
+      rescheduleWindow: "",
+      allowedChairs: "",
+      urgentIfUnavailable: null,
+      cancellationWindowHours: "",
+      bookBeforeWindow: "",
+      bookBeforeUnit: "hours",
+      doubleBookingAllowed: null,
+    };
+  });
+  return t;
+}
+
+function mergeApptTypes(loaded: unknown): Record<string, ApptTypeConfig> {
+  const base = defaultApptTypes();
+  if (!loaded || typeof loaded !== "object") return base;
+  const src = loaded as Record<string, Partial<ApptTypeConfig>>;
+  for (const key of Object.keys(src)) {
+    base[key] = { ...base[key], ...src[key] } as ApptTypeConfig;
+  }
+  return base;
+}
+
 function newClosureId(): string {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -158,7 +217,58 @@ function newLocationId(): string {
 }
 
 function emptyLocation(): AdditionalLocation {
-  return { id: newLocationId(), label: "", address: "", phone: "", email: "", parkingNotes: "", buildingAccess: "", notes: "" };
+  return {
+    id: newLocationId(),
+    label: "",
+    address: "",
+    phone: "",
+    email: "",
+    timezone: "",
+    parkingNotes: "",
+    buildingAccess: "",
+    clinicHours: defaultClinicHours(),
+    upcomingClosures: [],
+    lunchHours: defaultLunchHours(),
+    bookingScope: "new_only",
+    mainProvider: "",
+    allowedProviders: "",
+    ageRestrictions: "",
+    apptTypes: defaultApptTypes(),
+    otherApptType: "",
+    pmsName: "",
+    pmsVersion: "",
+    notes: "",
+  };
+}
+
+// Fills in defaults for any missing fields so old additional-location records
+// (which only had a handful of fields) still load cleanly.
+function coerceLocation(raw: unknown): AdditionalLocation {
+  const base = emptyLocation();
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  return {
+    id: typeof o.id === "string" && o.id ? o.id : base.id,
+    label: typeof o.label === "string" ? o.label : "",
+    address: typeof o.address === "string" ? o.address : "",
+    phone: typeof o.phone === "string" ? o.phone : "",
+    email: typeof o.email === "string" ? o.email : "",
+    timezone: typeof o.timezone === "string" ? o.timezone : "",
+    parkingNotes: typeof o.parkingNotes === "string" ? o.parkingNotes : "",
+    buildingAccess: typeof o.buildingAccess === "string" ? o.buildingAccess : "",
+    clinicHours: (o.clinicHours && typeof o.clinicHours === "object") ? (o.clinicHours as ClinicHours) : defaultClinicHours(),
+    upcomingClosures: Array.isArray(o.upcomingClosures) ? (o.upcomingClosures as Closure[]) : [],
+    lunchHours: (o.lunchHours && typeof o.lunchHours === "object") ? (o.lunchHours as LunchConfig) : defaultLunchHours(),
+    bookingScope: typeof o.bookingScope === "string" ? o.bookingScope : "new_only",
+    mainProvider: typeof o.mainProvider === "string" ? o.mainProvider : "",
+    allowedProviders: typeof o.allowedProviders === "string" ? o.allowedProviders : "",
+    ageRestrictions: typeof o.ageRestrictions === "string" ? o.ageRestrictions : "",
+    apptTypes: mergeApptTypes(o.apptTypes),
+    otherApptType: typeof o.otherApptType === "string" ? o.otherApptType : "",
+    pmsName: typeof o.pmsName === "string" ? o.pmsName : "",
+    pmsVersion: typeof o.pmsVersion === "string" ? o.pmsVersion : "",
+    notes: typeof o.notes === "string" ? o.notes : "",
+  };
 }
 
 function SectionHeader({ number, title }: { number: number; title: string }) {
@@ -219,6 +329,263 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 const inputCls = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
 const textareaCls = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+
+interface SchedulingSettings {
+  bookingScope: string;
+  mainProvider: string;
+  allowedProviders: string;
+  ageRestrictions: string;
+  apptTypes: Record<string, ApptTypeConfig>;
+  otherApptType: string;
+}
+
+function ClinicHoursEditor({ value, onChange }: { value: ClinicHours; onChange: (v: ClinicHours) => void }) {
+  return (
+    <div className="space-y-2 rounded-lg border p-4">
+      {DAYS.map(day => {
+        const cfg = value[day] ?? { open: "09:00", close: "17:00", closed: false };
+        const patch = (p: Partial<typeof cfg>) => onChange({ ...value, [day]: { ...cfg, ...p } });
+        return (
+          <div key={day} className="flex items-center gap-3">
+            <span className="w-24 text-sm font-medium text-gray-700">{day}</span>
+            <label className="flex items-center gap-1.5 text-sm text-gray-500">
+              <input type="checkbox" checked={cfg.closed} onChange={e => patch({ closed: e.target.checked })} className="rounded border-gray-300" />
+              Closed
+            </label>
+            {!cfg.closed && (
+              <>
+                <input type="time" value={cfg.open || "09:00"} onChange={e => patch({ open: e.target.value })} className="rounded border border-gray-300 px-2 py-1 text-sm" />
+                <span className="text-gray-400">to</span>
+                <input type="time" value={cfg.close || "17:00"} onChange={e => patch({ close: e.target.value })} className="rounded border border-gray-300 px-2 py-1 text-sm" />
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ClosuresEditor({ value, onChange }: { value: Closure[]; onChange: (v: Closure[]) => void }) {
+  const patch = (id: string, p: Partial<Closure>) => onChange(value.map(x => x.id === id ? { ...x, ...p } : x));
+  const remove = (id: string) => onChange(value.filter(x => x.id !== id));
+  const add = () => onChange([
+    ...value,
+    { id: newClosureId(), date: todayISO(), mode: "closed", startTime: "09:00", endTime: "17:00", label: "" },
+  ]);
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      {value.length === 0 && (
+        <p className="text-sm text-gray-400">No closures added yet.</p>
+      )}
+      {value.map((c) => (
+        <div key={c.id} className="rounded-lg border bg-white p-3">
+          <div className="grid gap-3 sm:grid-cols-12">
+            <div className="sm:col-span-3">
+              <label className="mb-1 block text-xs text-gray-500">Date</label>
+              <input type="date" value={c.date} min={todayISO()} max={plusDaysISO(90)} onChange={e => patch(c.id, { date: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+            </div>
+            <div className="sm:col-span-3">
+              <label className="mb-1 block text-xs text-gray-500">Type</label>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => patch(c.id, { mode: "closed" })} className={`flex-1 rounded px-2 py-1 text-xs font-medium ${c.mode === "closed" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Closed</button>
+                <button type="button" onClick={() => patch(c.id, { mode: "adjusted" })} className={`flex-1 rounded px-2 py-1 text-xs font-medium ${c.mode === "adjusted" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Adjusted hours</button>
+              </div>
+            </div>
+            {c.mode === "adjusted" && (
+              <div className="sm:col-span-3">
+                <label className="mb-1 block text-xs text-gray-500">Hours</label>
+                <div className="flex items-center gap-1">
+                  <input type="time" value={c.startTime} onChange={e => patch(c.id, { startTime: e.target.value })} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
+                  <span className="text-xs text-gray-400">-</span>
+                  <input type="time" value={c.endTime} onChange={e => patch(c.id, { endTime: e.target.value })} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
+                </div>
+              </div>
+            )}
+            <div className={c.mode === "adjusted" ? "sm:col-span-3" : "sm:col-span-6"}>
+              <label className="mb-1 block text-xs text-gray-500">Label (optional)</label>
+              <input type="text" value={c.label} onChange={e => patch(c.id, { label: e.target.value })} placeholder="e.g., Memorial Day, Dr. out of office" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+            </div>
+          </div>
+          <div className="mt-2 flex justify-end">
+            <button type="button" onClick={() => remove(c.id)} className="text-xs font-medium text-red-500 hover:text-red-700">Remove</button>
+          </div>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+        Add a closure or adjusted day
+      </button>
+    </div>
+  );
+}
+
+function LunchHoursEditor({ value, onChange }: { value: LunchConfig; onChange: (v: LunchConfig) => void }) {
+  const copyMondayToAll = () => {
+    const monday = value["Monday"] || { start: "12:00", end: "13:00", noLunch: false };
+    const next: LunchConfig = {};
+    DAYS.forEach(d => { next[d] = { ...monday }; });
+    onChange(next);
+  };
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">Set lunch hours for each day. Check &ldquo;No lunch&rdquo; for days your office doesn&rsquo;t break.</p>
+        <button type="button" onClick={copyMondayToAll} className="text-sm font-medium text-blue-600 hover:underline">Use same lunch for all days</button>
+      </div>
+      <div className="space-y-2 rounded-lg border p-4">
+        {DAYS.map(day => {
+          const cfg = value[day] || { start: "12:00", end: "13:00", noLunch: false };
+          const patch = (p: Partial<typeof cfg>) => onChange({ ...value, [day]: { ...cfg, ...p } });
+          return (
+            <div key={day} className="flex items-center gap-3">
+              <span className="w-24 text-sm font-medium text-gray-700">{day}</span>
+              <label className="flex items-center gap-1.5 text-sm text-gray-500">
+                <input type="checkbox" checked={cfg.noLunch} onChange={e => patch({ noLunch: e.target.checked })} className="rounded border-gray-300" />
+                No lunch
+              </label>
+              <input type="time" value={cfg.start} disabled={cfg.noLunch} onChange={e => patch({ start: e.target.value })} className="rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+              <span className="text-gray-400">to</span>
+              <input type="time" value={cfg.end} disabled={cfg.noLunch} onChange={e => patch({ end: e.target.value })} className="rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SchedulingSettingsEditor({ value, onChange }: { value: SchedulingSettings; onChange: (v: SchedulingSettings) => void }) {
+  const patch = (p: Partial<SchedulingSettings>) => onChange({ ...value, ...p });
+  const visibleTypes = value.bookingScope === "new_only" ? NEW_PATIENT_TYPES : APPOINTMENT_TYPES;
+  const patchType = (type: string, p: Partial<ApptTypeConfig>) =>
+    patch({ apptTypes: { ...value.apptTypes, [type]: { ...value.apptTypes[type], ...p } } });
+  return (
+    <div className="space-y-4">
+      <Field label="What can Orthia book?">
+        <select value={value.bookingScope} onChange={e => patch({ bookingScope: e.target.value })} className={inputCls}>
+          <option value="new_only">New patients only</option>
+          <option value="new_and_existing">New and existing patients</option>
+        </select>
+        <p className="mt-1 text-xs text-blue-600">You can start with just new patients. Existing patient booking can be configured later.</p>
+      </Field>
+      <Field label="Main Provider for Booking Appointments">
+        <input type="text" value={value.mainProvider} onChange={e => patch({ mainProvider: e.target.value })} placeholder="e.g., Dr. Smith" className={inputCls} />
+      </Field>
+      {visibleTypes.length > 0 && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+          <p className="mb-3 text-sm font-medium text-gray-700">Select appointment types Orthia can book:</p>
+          <div className="space-y-4">
+            {visibleTypes.map(type => {
+              const cfg = value.apptTypes[type] ?? defaultApptTypes()[type];
+              return (
+                <div key={type}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={cfg.enabled} onChange={e => patchType(type, { enabled: e.target.checked })} className="rounded border-gray-300" />
+                    <span className="font-medium">{type}</span>
+                  </label>
+                  {cfg.enabled && (
+                    <div className="ml-6 mt-2 grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-6">
+                      <div className="sm:col-span-6">
+                        <label className="mb-1 block text-xs text-gray-500">Allowed Days</label>
+                        <div className="flex flex-wrap gap-1">
+                          {DAYS.map(d => (
+                            <button key={d} type="button" onClick={() => {
+                              const days = cfg.days.includes(d) ? cfg.days.filter(x => x !== d) : [...cfg.days, d];
+                              patchType(type, { days });
+                            }} className={`rounded px-2 py-0.5 text-xs font-medium ${cfg.days.includes(d) ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>
+                              {d.slice(0, 3)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Time Range</label>
+                        <div className="flex items-center gap-1">
+                          <input type="time" value={cfg.startTime} onChange={e => patchType(type, { startTime: e.target.value })} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
+                          <span className="text-xs text-gray-400">-</span>
+                          <input type="time" value={cfg.endTime} onChange={e => patchType(type, { endTime: e.target.value })} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
+                        </div>
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Duration (min)</label>
+                        <input type="number" value={cfg.duration} onChange={e => patchType(type, { duration: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" min="5" step="5" />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Reschedule window (days)</label>
+                        <input type="number" value={cfg.rescheduleWindow} onChange={e => patchType(type, { rescheduleWindow: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 7" min="0" />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Cancellation window (hours)</label>
+                        <input type="number" value={cfg.cancellationWindowHours} onChange={e => patchType(type, { cancellationWindowHours: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 24" min="0" />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Book-before window</label>
+                        <div className="flex items-center gap-1">
+                          <input type="number" value={cfg.bookBeforeWindow} onChange={e => patchType(type, { bookBeforeWindow: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 2" min="0" />
+                          <select value={cfg.bookBeforeUnit} onChange={e => patchType(type, { bookBeforeUnit: e.target.value as "hours" | "days" })} className="rounded border border-gray-300 px-1.5 py-1 text-xs">
+                            <option value="hours">hours</option>
+                            <option value="days">days</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Allowed Chairs</label>
+                        <input type="text" value={cfg.allowedChairs} onChange={e => patchType(type, { allowedChairs: e.target.value })} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="Leave blank if no specific chair" />
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Double booking allowed?</label>
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => patchType(type, { doubleBookingAllowed: true })} className={`rounded px-3 py-0.5 text-xs font-medium ${cfg.doubleBookingAllowed === true ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Yes</button>
+                          <button type="button" onClick={() => patchType(type, { doubleBookingAllowed: false })} className={`rounded px-3 py-0.5 text-xs font-medium ${cfg.doubleBookingAllowed === false ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>No</button>
+                        </div>
+                      </div>
+                      <div className="sm:col-span-3">
+                        <label className="mb-1 block text-xs text-gray-500">Urgent task if unavailable?</label>
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => patchType(type, { urgentIfUnavailable: true })} className={`rounded px-3 py-0.5 text-xs font-medium ${cfg.urgentIfUnavailable === true ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Yes</button>
+                          <button type="button" onClick={() => patchType(type, { urgentIfUnavailable: false })} className={`rounded px-3 py-0.5 text-xs font-medium ${cfg.urgentIfUnavailable === false ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>No</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <Field label="Other Appointment Type">
+              <input type="text" value={value.otherApptType} onChange={e => patch({ otherApptType: e.target.value })} placeholder="Specify any other types..." className={inputCls} />
+              <p className="mt-1 text-xs text-gray-500">
+                If you need appointment types beyond the ones we offer out of the box, let us know here. We&rsquo;ll discuss these during your onboarding call. Custom appointment types require additional configuration and may involve an added fee depending on scope.
+              </p>
+            </Field>
+          </div>
+        </div>
+      )}
+      <Field label="Allowed Providers">
+        <textarea value={value.allowedProviders} onChange={e => patch({ allowedProviders: e.target.value })} rows={2} placeholder="List providers Orthia can schedule for..." className={textareaCls} />
+      </Field>
+      <Field label="Age Restrictions">
+        <input type="text" value={value.ageRestrictions} onChange={e => patch({ ageRestrictions: e.target.value })} placeholder="e.g., 7 and older" className={inputCls} />
+      </Field>
+    </div>
+  );
+}
+
+function PmsEditor({ value, onChange }: { value: { pmsName: string; pmsVersion: string }; onChange: (v: { pmsName: string; pmsVersion: string }) => void }) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label="PMS Name">
+        <select value={value.pmsName} onChange={e => onChange({ ...value, pmsName: e.target.value })} className={inputCls}>
+          <option value="">Select...</option>
+          {PMS_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </Field>
+      <Field label="PMS Version">
+        <input type="text" value={value.pmsVersion} onChange={e => onChange({ ...value, pmsVersion: e.target.value })} placeholder="e.g., 21.1" className={inputCls} />
+      </Field>
+    </div>
+  );
+}
 
 function ContactBlock({
   label,
@@ -461,7 +828,7 @@ function OnboardForm() {
       if (d.address) setAddress(d.address);
       if (d.multiLocation !== undefined) setMultiLocation(d.multiLocation);
       if (Array.isArray(d.additionalLocationsList)) {
-        setAdditionalLocationsList(d.additionalLocationsList as AdditionalLocation[]);
+        setAdditionalLocationsList((d.additionalLocationsList as unknown[]).map(coerceLocation));
       } else if (typeof d.additionalLocations === "string" && d.additionalLocations.trim()) {
         // Migrate legacy newline-separated string into one location card per line.
         const migrated = d.additionalLocations
@@ -593,7 +960,7 @@ function OnboardForm() {
           if (fd.address) setAddress(fd.address as string);
           if (fd.multiLocation) setMultiLocation(fd.multiLocation as boolean);
           if (Array.isArray(fd.additionalLocationsList)) {
-            setAdditionalLocationsList(fd.additionalLocationsList as AdditionalLocation[]);
+            setAdditionalLocationsList((fd.additionalLocationsList as unknown[]).map(coerceLocation));
           } else if (typeof fd.additionalLocations === "string" && (fd.additionalLocations as string).trim()) {
             // Migrate legacy newline-separated string to one location card per line.
             const migrated = (fd.additionalLocations as string)
@@ -966,54 +1333,123 @@ function OnboardForm() {
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <label className="block text-sm font-medium text-gray-700">Additional Locations</label>
-                    <span className="text-xs text-gray-400">One card per location</span>
+                    <span className="text-xs text-gray-400">Fully independent settings per clinic</span>
                   </div>
                   <p className="mb-2 text-xs text-gray-500">
-                    Fill in details for each additional location. Anything left blank will default to what you entered above for the main location. Use the notes field for anything else that differs (hours, providers, PMS, etc.) &mdash; we&rsquo;ll refine specifics on the onboarding call.
+                    Each clinic is part of one organization but has its own hours, closures, lunch, scheduling rules, appointment types, and PMS. Fill in what applies at each location &mdash; we&rsquo;ll reconcile anything missing during the onboarding call.
                   </p>
-                  <div className="space-y-3 rounded-lg border p-4">
+                  <div className="space-y-4 rounded-lg border p-4">
                     {additionalLocationsList.length === 0 && (
                       <p className="text-sm text-gray-400">No additional locations added yet.</p>
                     )}
-                    {additionalLocationsList.map((loc, idx) => (
-                      <div key={loc.id} className="rounded-lg border bg-white p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-sm font-medium text-gray-700">Location {idx + 2}</p>
-                          <button
-                            type="button"
-                            onClick={() => setAdditionalLocationsList(prev => prev.filter(x => x.id !== loc.id))}
-                            className="text-xs font-medium text-red-500 hover:text-red-700"
-                          >
-                            Remove
-                          </button>
+                    {additionalLocationsList.map((loc, idx) => {
+                      const patchLoc = (p: Partial<AdditionalLocation>) =>
+                        setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, ...p } : x));
+                      return (
+                        <div key={loc.id} className="space-y-4 rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+                          <div className="flex items-center justify-between border-b pb-2">
+                            <p className="text-base font-semibold text-gray-900">
+                              Location {idx + 2}{loc.label ? <span className="ml-2 font-normal text-gray-500">&mdash; {loc.label}</span> : null}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setAdditionalLocationsList(prev => prev.filter(x => x.id !== loc.id))}
+                              className="text-xs font-medium text-red-500 hover:text-red-700"
+                            >
+                              Remove this location
+                            </button>
+                          </div>
+
+                          {/* Location info */}
+                          <div className="space-y-3">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <Field label="Location Label">
+                                <input type="text" value={loc.label} onChange={e => patchLoc({ label: e.target.value })} placeholder="e.g., North clinic" className={inputCls} />
+                              </Field>
+                              <Field label="Address" required>
+                                <input type="text" value={loc.address} onChange={e => patchLoc({ address: e.target.value })} placeholder="123 Main St, City, State ZIP" className={inputCls} required />
+                              </Field>
+                              <Field label="Office Phone">
+                                <input type="tel" value={loc.phone} onChange={e => patchLoc({ phone: e.target.value })} placeholder="(555) 123-4567" className={inputCls} />
+                              </Field>
+                              <Field label="Office Email">
+                                <input type="email" value={loc.email} onChange={e => patchLoc({ email: e.target.value })} placeholder="location@practice.com" className={inputCls} />
+                              </Field>
+                              <Field label="Time Zone">
+                                <select value={loc.timezone} onChange={e => patchLoc({ timezone: e.target.value })} className={inputCls}>
+                                  <option value="">Same as main location</option>
+                                  {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                                </select>
+                              </Field>
+                              <Field label="Parking Notes">
+                                <input type="text" value={loc.parkingNotes} onChange={e => patchLoc({ parkingNotes: e.target.value })} placeholder="Free lot behind building..." className={inputCls} />
+                              </Field>
+                              <Field label="Building Access / Suite / Floor">
+                                <input type="text" value={loc.buildingAccess} onChange={e => patchLoc({ buildingAccess: e.target.value })} placeholder="Suite 200, 2nd floor..." className={inputCls} />
+                              </Field>
+                            </div>
+                          </div>
+
+                          {/* Clinic hours */}
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-gray-700">Clinic Hours</label>
+                            <ClinicHoursEditor value={loc.clinicHours} onChange={v => patchLoc({ clinicHours: v })} />
+                          </div>
+
+                          {/* Upcoming closures */}
+                          <div>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <label className="block text-sm font-medium text-gray-700">Upcoming closures and adjusted hours</label>
+                              <span className="text-xs text-gray-400">Optional</span>
+                            </div>
+                            <ClosuresEditor value={loc.upcomingClosures} onChange={v => patchLoc({ upcomingClosures: v })} />
+                          </div>
+
+                          {/* Lunch hours */}
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-gray-700">Lunch Hours</label>
+                            <LunchHoursEditor value={loc.lunchHours} onChange={v => patchLoc({ lunchHours: v })} />
+                          </div>
+
+                          {/* Scheduling */}
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-gray-700">Availability &amp; Scheduling Rules</label>
+                            <SchedulingSettingsEditor
+                              value={{
+                                bookingScope: loc.bookingScope,
+                                mainProvider: loc.mainProvider,
+                                allowedProviders: loc.allowedProviders,
+                                ageRestrictions: loc.ageRestrictions,
+                                apptTypes: loc.apptTypes,
+                                otherApptType: loc.otherApptType,
+                              }}
+                              onChange={v => patchLoc({
+                                bookingScope: v.bookingScope,
+                                mainProvider: v.mainProvider,
+                                allowedProviders: v.allowedProviders,
+                                ageRestrictions: v.ageRestrictions,
+                                apptTypes: v.apptTypes,
+                                otherApptType: v.otherApptType,
+                              })}
+                            />
+                          </div>
+
+                          {/* PMS */}
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-gray-700">Practice Management Software</label>
+                            <PmsEditor
+                              value={{ pmsName: loc.pmsName, pmsVersion: loc.pmsVersion }}
+                              onChange={v => patchLoc({ pmsName: v.pmsName, pmsVersion: v.pmsVersion })}
+                            />
+                          </div>
+
+                          {/* Freeform notes */}
+                          <Field label="Anything else specific to this location?">
+                            <textarea value={loc.notes} onChange={e => patchLoc({ notes: e.target.value })} rows={2} placeholder="Anything not covered above" className={textareaCls} />
+                          </Field>
                         </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <Field label="Location Label">
-                            <input type="text" value={loc.label} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, label: e.target.value } : x))} placeholder="e.g., North clinic" className={inputCls} />
-                          </Field>
-                          <Field label="Address" required>
-                            <input type="text" value={loc.address} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, address: e.target.value } : x))} placeholder="123 Main St, City, State ZIP" className={inputCls} required />
-                          </Field>
-                          <Field label="Office Phone">
-                            <input type="tel" value={loc.phone} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, phone: e.target.value } : x))} placeholder="(555) 123-4567" className={inputCls} />
-                          </Field>
-                          <Field label="Office Email">
-                            <input type="email" value={loc.email} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, email: e.target.value } : x))} placeholder="location@practice.com" className={inputCls} />
-                          </Field>
-                          <Field label="Parking Notes">
-                            <input type="text" value={loc.parkingNotes} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, parkingNotes: e.target.value } : x))} placeholder="Free lot behind building..." className={inputCls} />
-                          </Field>
-                          <Field label="Building Access / Suite / Floor">
-                            <input type="text" value={loc.buildingAccess} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, buildingAccess: e.target.value } : x))} placeholder="Suite 200, 2nd floor..." className={inputCls} />
-                          </Field>
-                        </div>
-                        <div className="mt-3">
-                          <Field label="Anything else that differs at this location?">
-                            <textarea value={loc.notes} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, notes: e.target.value } : x))} rows={2} placeholder="Hours, providers, PMS differences, etc." className={textareaCls} />
-                          </Field>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <button
                       type="button"
                       onClick={() => setAdditionalLocationsList(prev => [...prev, emptyLocation()])}
@@ -1066,29 +1502,7 @@ function OnboardForm() {
               {/* Clinic Hours */}
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Clinic Hours</label>
-                <div className="space-y-2 rounded-lg border p-4">
-                  {DAYS.map(day => (
-                    <div key={day} className="flex items-center gap-3">
-                      <span className="w-24 text-sm font-medium text-gray-700">{day}</span>
-                      <label className="flex items-center gap-1.5 text-sm text-gray-500">
-                        <input
-                          type="checkbox"
-                          checked={clinicHours[day]?.closed ?? false}
-                          onChange={e => setClinicHours(prev => ({ ...prev, [day]: { ...prev[day], closed: e.target.checked } }))}
-                          className="rounded border-gray-300"
-                        />
-                        Closed
-                      </label>
-                      {!clinicHours[day]?.closed && (
-                        <>
-                          <input type="time" value={clinicHours[day]?.open || "09:00"} onChange={e => setClinicHours(prev => ({ ...prev, [day]: { ...prev[day], open: e.target.value } }))} className="rounded border border-gray-300 px-2 py-1 text-sm" />
-                          <span className="text-gray-400">to</span>
-                          <input type="time" value={clinicHours[day]?.close || "17:00"} onChange={e => setClinicHours(prev => ({ ...prev, [day]: { ...prev[day], close: e.target.value } }))} className="rounded border border-gray-300 px-2 py-1 text-sm" />
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <ClinicHoursEditor value={clinicHours} onChange={setClinicHours} />
               </div>
 
               {/* Upcoming closures and adjusted hours */}
@@ -1100,97 +1514,7 @@ function OnboardForm() {
                 <p className="mb-2 text-xs text-gray-500">
                   Add dates in the next 3 months where you&rsquo;ll be closed or on adjusted hours (holidays, training days, doctor out of office). You can always add more later.
                 </p>
-                <div className="space-y-3 rounded-lg border p-4">
-                  {upcomingClosures.length === 0 && (
-                    <p className="text-sm text-gray-400">No closures added yet.</p>
-                  )}
-                  {upcomingClosures.map((c) => (
-                    <div key={c.id} className="rounded-lg border bg-white p-3">
-                      <div className="grid gap-3 sm:grid-cols-12">
-                        <div className="sm:col-span-3">
-                          <label className="mb-1 block text-xs text-gray-500">Date</label>
-                          <input
-                            type="date"
-                            value={c.date}
-                            min={todayISO()}
-                            max={plusDaysISO(90)}
-                            onChange={e => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, date: e.target.value } : x))}
-                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                          />
-                        </div>
-                        <div className="sm:col-span-3">
-                          <label className="mb-1 block text-xs text-gray-500">Type</label>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, mode: "closed" } : x))}
-                              className={`flex-1 rounded px-2 py-1 text-xs font-medium ${c.mode === "closed" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}
-                            >
-                              Closed
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, mode: "adjusted" } : x))}
-                              className={`flex-1 rounded px-2 py-1 text-xs font-medium ${c.mode === "adjusted" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}
-                            >
-                              Adjusted hours
-                            </button>
-                          </div>
-                        </div>
-                        {c.mode === "adjusted" && (
-                          <div className="sm:col-span-3">
-                            <label className="mb-1 block text-xs text-gray-500">Hours</label>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="time"
-                                value={c.startTime}
-                                onChange={e => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, startTime: e.target.value } : x))}
-                                className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs"
-                              />
-                              <span className="text-xs text-gray-400">-</span>
-                              <input
-                                type="time"
-                                value={c.endTime}
-                                onChange={e => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, endTime: e.target.value } : x))}
-                                className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs"
-                              />
-                            </div>
-                          </div>
-                        )}
-                        <div className={c.mode === "adjusted" ? "sm:col-span-3" : "sm:col-span-6"}>
-                          <label className="mb-1 block text-xs text-gray-500">Label (optional)</label>
-                          <input
-                            type="text"
-                            value={c.label}
-                            onChange={e => setUpcomingClosures(prev => prev.map(x => x.id === c.id ? { ...x, label: e.target.value } : x))}
-                            placeholder="e.g., Memorial Day, Dr. out of office"
-                            className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-2 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setUpcomingClosures(prev => prev.filter(x => x.id !== c.id))}
-                          className="text-xs font-medium text-red-500 hover:text-red-700"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setUpcomingClosures(prev => [
-                      ...prev,
-                      { id: newClosureId(), date: todayISO(), mode: "closed", startTime: "09:00", endTime: "17:00", label: "" },
-                    ])}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    Add a closure or adjusted day
-                  </button>
-                </div>
+                <ClosuresEditor value={upcomingClosures} onChange={setUpcomingClosures} />
               </div>
             </div>
           </section>
@@ -1198,122 +1522,17 @@ function OnboardForm() {
           {/* Section 2: Availability & Scheduling */}
           <section className="rounded-xl border bg-white p-6 shadow-sm">
             <SectionHeader number={2} title="Availability & Scheduling Rules" />
-            <div className="space-y-4">
-              <Field label="What can Orthia book?">
-                <select value={bookingScope} onChange={e => setBookingScope(e.target.value)} className={inputCls}>
-                  <option value="new_only">New patients only</option>
-                  <option value="new_and_existing">New and existing patients</option>
-                </select>
-                <p className="mt-1 text-xs text-blue-600">You can start with just new patients. Existing patient booking can be configured later.</p>
-              </Field>
-
-              <Field label="Main Provider for Booking Appointments">
-                <input type="text" value={mainProvider} onChange={e => setMainProvider(e.target.value)} placeholder="e.g., Dr. Smith" className={inputCls} />
-              </Field>
-
-              {(() => {
-                const visibleTypes = bookingScope === "new_only" ? NEW_PATIENT_TYPES : APPOINTMENT_TYPES;
-                return visibleTypes.length > 0 && (
-                <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4">
-                  <p className="mb-3 text-sm font-medium text-gray-700">Select appointment types Orthia can book:</p>
-                  <div className="space-y-4">
-                    {visibleTypes.map(type => (
-                      <div key={type}>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={apptTypes[type]?.enabled ?? false}
-                            onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], enabled: e.target.checked } }))}
-                            className="rounded border-gray-300"
-                          />
-                          <span className="font-medium">{type}</span>
-                        </label>
-                        {apptTypes[type]?.enabled && (
-                          <div className="ml-6 mt-2 grid gap-3 rounded-lg border bg-white p-3 sm:grid-cols-6">
-                            <div className="sm:col-span-6">
-                              <label className="mb-1 block text-xs text-gray-500">Allowed Days</label>
-                              <div className="flex flex-wrap gap-1">
-                                {DAYS.map(d => (
-                                  <button key={d} type="button" onClick={() => {
-                                    const cfg = apptTypes[type];
-                                    const days = cfg.days.includes(d) ? cfg.days.filter(x => x !== d) : [...cfg.days, d];
-                                    setApptTypes(prev => ({ ...prev, [type]: { ...cfg, days } }));
-                                  }} className={`rounded px-2 py-0.5 text-xs font-medium ${apptTypes[type].days.includes(d) ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>
-                                    {d.slice(0, 3)}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Time Range</label>
-                              <div className="flex items-center gap-1">
-                                <input type="time" value={apptTypes[type].startTime} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], startTime: e.target.value } }))} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
-                                <span className="text-xs text-gray-400">-</span>
-                                <input type="time" value={apptTypes[type].endTime} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], endTime: e.target.value } }))} className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs" />
-                              </div>
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Duration (min)</label>
-                              <input type="number" value={apptTypes[type].duration} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], duration: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" min="5" step="5" />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Reschedule window (days)</label>
-                              <input type="number" value={apptTypes[type].rescheduleWindow} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], rescheduleWindow: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 7" min="0" />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Cancellation window (hours)</label>
-                              <input type="number" value={apptTypes[type].cancellationWindowHours} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], cancellationWindowHours: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 24" min="0" />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Book-before window</label>
-                              <div className="flex items-center gap-1">
-                                <input type="number" value={apptTypes[type].bookBeforeWindow} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], bookBeforeWindow: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="e.g., 2" min="0" />
-                                <select value={apptTypes[type].bookBeforeUnit} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], bookBeforeUnit: e.target.value as "hours" | "days" } }))} className="rounded border border-gray-300 px-1.5 py-1 text-xs">
-                                  <option value="hours">hours</option>
-                                  <option value="days">days</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Allowed Chairs</label>
-                              <input type="text" value={apptTypes[type].allowedChairs} onChange={e => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], allowedChairs: e.target.value } }))} className="w-full rounded border border-gray-300 px-2 py-1 text-xs" placeholder="Leave blank if no specific chair" />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Double booking allowed?</label>
-                              <div className="flex gap-1">
-                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], doubleBookingAllowed: true } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].doubleBookingAllowed === true ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Yes</button>
-                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], doubleBookingAllowed: false } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].doubleBookingAllowed === false ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>No</button>
-                              </div>
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className="mb-1 block text-xs text-gray-500">Urgent task if unavailable?</label>
-                              <div className="flex gap-1">
-                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], urgentIfUnavailable: true } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].urgentIfUnavailable === true ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>Yes</button>
-                                <button type="button" onClick={() => setApptTypes(prev => ({ ...prev, [type]: { ...prev[type], urgentIfUnavailable: false } }))} className={`rounded px-3 py-0.5 text-xs font-medium ${apptTypes[type].urgentIfUnavailable === false ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600"}`}>No</button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    <Field label="Other Appointment Type">
-                      <input type="text" value={otherApptType} onChange={e => setOtherApptType(e.target.value)} placeholder="Specify any other types..." className={inputCls} />
-                      <p className="mt-1 text-xs text-gray-500">
-                        If you need appointment types beyond the ones we offer out of the box, let us know here. We&rsquo;ll discuss these during your onboarding call. Custom appointment types require additional configuration and may involve an added fee depending on scope.
-                      </p>
-                    </Field>
-                  </div>
-                </div>
-              );
-              })()}
-
-              <Field label="Allowed Providers">
-                <textarea value={allowedProviders} onChange={e => setAllowedProviders(e.target.value)} rows={2} placeholder="List providers Orthia can schedule for..." className={textareaCls} />
-              </Field>
-              <Field label="Age Restrictions">
-                <input type="text" value={ageRestrictions} onChange={e => setAgeRestrictions(e.target.value)} placeholder="e.g., 7 and older" className={inputCls} />
-              </Field>
-            </div>
+            <SchedulingSettingsEditor
+              value={{ bookingScope, mainProvider, allowedProviders, ageRestrictions, apptTypes, otherApptType }}
+              onChange={(v) => {
+                setBookingScope(v.bookingScope);
+                setMainProvider(v.mainProvider);
+                setAllowedProviders(v.allowedProviders);
+                setAgeRestrictions(v.ageRestrictions);
+                setApptTypes(v.apptTypes);
+                setOtherApptType(v.otherApptType);
+              }}
+            />
           </section>
 
           {/* Section 3: Intake Rules */}
@@ -1366,59 +1585,7 @@ function OnboardForm() {
           {/* Section 5: Lunch Hours */}
           <section className="rounded-xl border bg-white p-6 shadow-sm">
             <SectionHeader number={5} title="Lunch Hours" />
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-500">Set lunch hours for each day. Check &ldquo;No lunch&rdquo; for days your office doesn&rsquo;t break.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const monday = lunchHours["Monday"] || { start: "12:00", end: "13:00", noLunch: false };
-                    setLunchHours(() => {
-                      const next: LunchConfig = {};
-                      DAYS.forEach(d => { next[d] = { ...monday }; });
-                      return next;
-                    });
-                  }}
-                  className="text-sm font-medium text-blue-600 hover:underline"
-                >
-                  Use same lunch for all days
-                </button>
-              </div>
-              <div className="space-y-2 rounded-lg border p-4">
-                {DAYS.map(day => {
-                  const cfg = lunchHours[day] || { start: "12:00", end: "13:00", noLunch: false };
-                  return (
-                    <div key={day} className="flex items-center gap-3">
-                      <span className="w-24 text-sm font-medium text-gray-700">{day}</span>
-                      <label className="flex items-center gap-1.5 text-sm text-gray-500">
-                        <input
-                          type="checkbox"
-                          checked={cfg.noLunch}
-                          onChange={e => setLunchHours(prev => ({ ...prev, [day]: { ...(prev[day] || cfg), noLunch: e.target.checked } }))}
-                          className="rounded border-gray-300"
-                        />
-                        No lunch
-                      </label>
-                      <input
-                        type="time"
-                        value={cfg.start}
-                        disabled={cfg.noLunch}
-                        onChange={e => setLunchHours(prev => ({ ...prev, [day]: { ...(prev[day] || cfg), start: e.target.value } }))}
-                        className="rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                      />
-                      <span className="text-gray-400">to</span>
-                      <input
-                        type="time"
-                        value={cfg.end}
-                        disabled={cfg.noLunch}
-                        onChange={e => setLunchHours(prev => ({ ...prev, [day]: { ...(prev[day] || cfg), end: e.target.value } }))}
-                        className="rounded border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <LunchHoursEditor value={lunchHours} onChange={setLunchHours} />
           </section>
 
           {/* Section 6: Insurance Verification */}
@@ -1553,17 +1720,10 @@ function OnboardForm() {
           {/* Section 9: PMS Details */}
           <section className="rounded-xl border bg-white p-6 shadow-sm">
             <SectionHeader number={9} title="Practice Management Software" />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="PMS Name">
-                <select value={pmsName} onChange={e => setPmsName(e.target.value)} className={inputCls}>
-                  <option value="">Select...</option>
-                  {PMS_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </Field>
-              <Field label="PMS Version">
-                <input type="text" value={pmsVersion} onChange={e => setPmsVersion(e.target.value)} placeholder="e.g., 21.1" className={inputCls} />
-              </Field>
-            </div>
+            <PmsEditor
+              value={{ pmsName, pmsVersion }}
+              onChange={(v) => { setPmsName(v.pmsName); setPmsVersion(v.pmsVersion); }}
+            />
           </section>
 
           {/* Section 10: Contact Information */}

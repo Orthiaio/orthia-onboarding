@@ -1,12 +1,134 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Submission } from "@/lib/types";
 
 interface ResearchData {
   found: boolean;
   confidence: string;
   data: Record<string, unknown>;
+}
+
+const WEEKDAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+type FormDataMap = Record<string, unknown>;
+type ClinicMap = Record<string, unknown>;
+
+interface ClinicRow {
+  submission: Submission;
+  clinicIndex: number;        // 0 = main, 1..N = additional
+  clinicKey: string;          // stable row key
+  label: string;              // "Main" or "Location 2 — North Clinic"
+  address: string;
+  phone: string;
+  email: string;
+  pms: string;
+}
+
+function getAdditionalLocations(s: Submission): ClinicMap[] {
+  const fd = (s.form_data || {}) as FormDataMap;
+  const list = fd.additionalLocationsList;
+  return Array.isArray(list) ? (list as ClinicMap[]) : [];
+}
+
+function flattenClinics(submissions: Submission[]): ClinicRow[] {
+  const rows: ClinicRow[] = [];
+  for (const s of submissions) {
+    const fd = (s.form_data || {}) as FormDataMap;
+    rows.push({
+      submission: s,
+      clinicIndex: 0,
+      clinicKey: `${s.id}:main`,
+      label: "Main",
+      address: (fd.address as string) || "",
+      phone: s.office_phone || "",
+      email: s.office_email || (fd.officeEmail as string) || "",
+      pms: s.pms || "",
+    });
+    getAdditionalLocations(s).forEach((loc, i) => {
+      const labelTxt = (loc.label as string) || "";
+      rows.push({
+        submission: s,
+        clinicIndex: i + 1,
+        clinicKey: `${s.id}:loc-${(loc.id as string) || i}`,
+        label: `Location ${i + 2}${labelTxt ? ` — ${labelTxt}` : ""}`,
+        address: (loc.address as string) || "",
+        phone: (loc.phone as string) || "",
+        email: (loc.email as string) || "",
+        pms: (loc.pmsName as string) || "",
+      });
+    });
+  }
+  return rows;
+}
+
+// Formatters used by the per-clinic download.
+function fmtContact(v: unknown): string {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const parts: string[] = [];
+    if (o.name) parts.push(String(o.name));
+    if (o.email) parts.push(String(o.email));
+    if (o.phone) parts.push(String(o.phone));
+    return parts.join(" · ");
+  }
+  return "";
+}
+
+function fmtHours(h: unknown): string {
+  if (!h || typeof h !== "object") return "";
+  const o = h as Record<string, { open?: string; close?: string; closed?: boolean }>;
+  const lines: string[] = [];
+  for (const day of WEEKDAY_ORDER) {
+    const d = o[day];
+    if (!d) continue;
+    lines.push(d.closed ? `${day}: Closed` : `${day}: ${d.open || "?"} - ${d.close || "?"}`);
+  }
+  return lines.join("\n");
+}
+
+function fmtLunch(h: unknown): string {
+  if (!h || typeof h !== "object") return "";
+  const o = h as Record<string, { start?: string; end?: string; noLunch?: boolean }>;
+  const lines: string[] = [];
+  for (const day of WEEKDAY_ORDER) {
+    const d = o[day];
+    if (!d) continue;
+    lines.push(d.noLunch ? `${day}: No lunch` : `${day}: ${d.start || "?"} - ${d.end || "?"}`);
+  }
+  return lines.join("\n");
+}
+
+function fmtClosures(list: unknown): string {
+  if (!Array.isArray(list) || list.length === 0) return "";
+  return (list as Array<Record<string, unknown>>).map(c => {
+    const label = c.label ? ` (${c.label})` : "";
+    if (c.mode === "closed") return `- ${c.date}: Closed${label}`;
+    return `- ${c.date}: ${c.startTime} - ${c.endTime}${label}`;
+  }).join("\n");
+}
+
+function fmtApptTypes(types: unknown): string {
+  if (!types || typeof types !== "object") return "";
+  const o = types as Record<string, Record<string, unknown>>;
+  let out = "";
+  for (const [name, cfg] of Object.entries(o)) {
+    if (!cfg?.enabled) continue;
+    out += `${name}\n`;
+    if (Array.isArray(cfg.days) && cfg.days.length > 0) out += `  - Allowed Days: ${cfg.days.join(", ")}\n`;
+    if (cfg.startTime && cfg.endTime) out += `  - Time Range: ${cfg.startTime} - ${cfg.endTime}\n`;
+    if (cfg.duration) out += `  - Duration: ${cfg.duration} min\n`;
+    if (cfg.rescheduleWindow) out += `  - Reschedule Window: ${cfg.rescheduleWindow} days\n`;
+    if (cfg.cancellationWindowHours) out += `  - Cancellation Window: ${cfg.cancellationWindowHours} hours\n`;
+    if (cfg.bookBeforeWindow) out += `  - Book-before Window: ${cfg.bookBeforeWindow} ${cfg.bookBeforeUnit || "hours"}\n`;
+    if (cfg.allowedChairs) out += `  - Allowed Chairs: ${cfg.allowedChairs}\n`;
+    if (cfg.doubleBookingAllowed !== null && cfg.doubleBookingAllowed !== undefined) out += `  - Double Booking Allowed: ${cfg.doubleBookingAllowed ? "Yes" : "No"}\n`;
+    if (cfg.urgentIfUnavailable !== null && cfg.urgentIfUnavailable !== undefined) out += `  - Urgent if Unavailable: ${cfg.urgentIfUnavailable ? "Yes" : "No"}\n`;
+    out += "\n";
+  }
+  return out.trim();
 }
 
 export default function AdminPage() {
@@ -17,6 +139,7 @@ export default function AdminPage() {
 
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const clinicRows = useMemo(() => flattenClinics(submissions), [submissions]);
 
   const [clinicName, setClinicName] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -202,90 +325,123 @@ export default function AdminPage() {
     }
   }
 
-  function handleDownload(s: Submission) {
-    const fd = (s.form_data || {}) as Record<string, unknown>;
+  function handleDownload(s: Submission, clinicIndex: number = 0) {
+    const fd = (s.form_data || {}) as FormDataMap;
+
     const line = (label: string, value: unknown) => {
       if (value === null || value === undefined || value === "") return "";
       return `${label}: ${String(value)}\n`;
+    };
+    const block = (label: string, value: string) => {
+      const t = value.trim();
+      return t ? `${label}:\n${t}\n\n` : "";
     };
     const section = (title: string, content: string) => {
       const trimmed = content.trim();
       return trimmed ? `${title.toUpperCase()}\n${"=".repeat(title.length)}\n${trimmed}\n\n` : "";
     };
 
-    // Format appointment types
-    let apptSection = "";
-    const apptTypes = fd.apptTypes as Record<string, Record<string, unknown>> | undefined;
-    if (apptTypes) {
-      for (const [name, cfg] of Object.entries(apptTypes)) {
-        if (!cfg?.enabled) continue;
-        apptSection += `${name}\n`;
-        if (Array.isArray(cfg.days) && cfg.days.length > 0) apptSection += `- Allowed Days: ${cfg.days.join(", ")}\n`;
-        if (cfg.startTime && cfg.endTime) apptSection += `- Time Range: ${cfg.startTime} - ${cfg.endTime}\n`;
-        if (cfg.duration) apptSection += `- Duration: ${cfg.duration} min\n`;
-        if (cfg.rescheduleWindow) apptSection += `- Reschedule Window: ${cfg.rescheduleWindow} days\n`;
-        if (cfg.allowedChairs) apptSection += `- Allowed Chairs: ${cfg.allowedChairs}\n`;
-        if (cfg.urgentIfUnavailable !== null && cfg.urgentIfUnavailable !== undefined) apptSection += `- Urgent Task if Unavailable: ${cfg.urgentIfUnavailable ? "Yes" : "No"}\n`;
-        apptSection += "\n";
+    // Resolve the per-clinic slice for this row.
+    const isMain = clinicIndex === 0;
+    let cl: ClinicMap;
+    let clinicHeading: string;
+    if (isMain) {
+      // Legacy: fall back to the pre-per-day lunchStart/lunchEnd if needed.
+      let lunchHours = fd.lunchHours;
+      if (!lunchHours && (fd.lunchStart || fd.lunchEnd)) {
+        const start = (fd.lunchStart as string) || "12:00";
+        const end = (fd.lunchEnd as string) || "13:00";
+        const synth: Record<string, { start: string; end: string; noLunch: boolean }> = {};
+        WEEKDAY_ORDER.forEach(d => { synth[d] = { start, end, noLunch: false }; });
+        lunchHours = synth;
       }
+      cl = {
+        label: "Main",
+        address: fd.address,
+        phone: s.office_phone,
+        email: s.office_email || fd.officeEmail,
+        timezone: fd.timezone,
+        parkingNotes: fd.parkingNotes,
+        buildingAccess: fd.buildingAccess,
+        clinicHours: fd.clinicHours,
+        upcomingClosures: fd.upcomingClosures,
+        lunchHours,
+        bookingScope: fd.bookingScope,
+        mainProvider: fd.mainProvider,
+        allowedProviders: fd.allowedProviders,
+        ageRestrictions: fd.ageRestrictions,
+        apptTypes: fd.apptTypes,
+        otherApptType: fd.otherApptType,
+        pmsName: s.pms || fd.pmsName,
+        pmsVersion: fd.pmsVersion,
+        notes: "",
+      };
+      clinicHeading = `${s.practice_name} — Main Location`;
+    } else {
+      const locs = getAdditionalLocations(s);
+      const loc = locs[clinicIndex - 1];
+      if (!loc) return;
+      cl = loc;
+      const labelTxt = (loc.label as string) || `Location ${clinicIndex + 1}`;
+      clinicHeading = `${s.practice_name} — ${labelTxt}`;
     }
 
-    // Format languages
-    const langs = fd.languages as Record<string, boolean> | undefined;
-    const langList = langs ? Object.entries(langs).filter(([, v]) => v).map(([k]) => k).join(", ") : "";
+    // Org-wide (shared) formatting.
+    const langs = fd.languages;
+    const langList = Array.isArray(langs) ? (langs as string[]).join(", ") : "";
+    const intakeList = Array.isArray(fd.intakeFields) ? (fd.intakeFields as string[]).join(", ") : "";
+    const emergencyActions = Array.isArray(fd.emergencyActions) ? (fd.emergencyActions as string[]).join(", ") : "";
 
-    // Format intake fields
-    const intake = fd.intakeFields as Record<string, boolean> | undefined;
-    const intakeList = intake ? Object.entries(intake).filter(([, v]) => v).map(([k]) => k).join(", ") : "";
+    const md = `${clinicHeading} — Onboarding Configuration
+${"=".repeat((clinicHeading + " — Onboarding Configuration").length)}
 
-    const md = `${s.practice_name} — Onboarding Configuration
-${"=".repeat((s.practice_name + " — Onboarding Configuration").length)}
+Organization: ${s.practice_name}
+Clinic: ${isMain ? "Main" : (cl.label as string) || `Location ${clinicIndex + 1}`}
 
-${section("Practice Information",
+${section("Clinic Information",
+  line("Clinic Label", cl.label) +
+  line("Address", cl.address) +
+  line("Office Phone", cl.phone) +
+  line("Office Email", cl.email) +
+  line("Timezone", cl.timezone || (isMain ? "" : fd.timezone)) +
+  line("Parking Notes", cl.parkingNotes) +
+  line("Building Access", cl.buildingAccess) +
+  line("PMS Name", cl.pmsName) +
+  line("PMS Version", cl.pmsVersion) +
+  line("Location Notes", cl.notes)
+)}${section("Clinic Hours",
+  block("Weekly Hours", fmtHours(cl.clinicHours)) +
+  block("Lunch Hours", fmtLunch(cl.lunchHours)) +
+  block("Upcoming Closures", fmtClosures(cl.upcomingClosures))
+)}${section("Availability & Scheduling (this clinic)",
+  line("Booking Scope", cl.bookingScope) +
+  line("Main Provider", cl.mainProvider) +
+  line("Allowed Providers", cl.allowedProviders) +
+  line("Age Restrictions", cl.ageRestrictions) +
+  block("Appointment Types", fmtApptTypes(cl.apptTypes)) +
+  line("Other Appointment Type", cl.otherApptType)
+)}${section("Organization — Practice Information",
   line("Practice Name", s.practice_name) +
   line("DBA Name", s.dba_name || fd.dbaName) +
-  line("Office Phone", s.office_phone) +
-  line("Office Email", s.office_email || fd.officeEmail) +
   line("Website", s.website) +
-  line("Address", fd.address) +
-  line("Timezone", fd.timezone) +
-  line("PMS", s.pms) +
-  line("PMS Version", fd.pmsVersion) +
-  line("Multi-Location", fd.multiLocation ? "Yes" : "No") +
-  line("Additional Locations", fd.additionalLocations) +
-  line("Parking Notes", fd.parkingNotes) +
-  line("Building Access", fd.buildingAccess)
-)}${section("Contacts",
-  line("Primary Contact", s.contact_name) +
-  line("Contact Role", s.contact_role) +
-  line("Contact Email", s.email) +
-  line("Contact Phone", s.phone) +
-  line("Point of Contact", fd.pointOfContact) +
-  line("Billing Contact", fd.billingContact) +
-  line("Emergency Contact", fd.emergencyContact) +
-  line("Scheduling Contact", fd.schedulingContact)
-)}${section("Doctors & Providers",
   line("Doctor Names", fd.doctorNames) +
-  line("Main Provider for Booking", fd.mainProvider) +
-  line("Allowed Providers", fd.allowedProviders)
-)}${section("Clinic Hours",
-  line("Hours", fd.clinicHours) +
-  line("Lunch Start", fd.lunchStart) +
-  line("Lunch End", fd.lunchEnd)
-)}${section("Availability & Scheduling",
-  line("Booking Scope", fd.bookingScope) +
-  line("Age Restrictions", fd.ageRestrictions) +
-  line("Min Hours to Reschedule", fd.minRescheduleHours) +
-  line("Min Hours to Cancel", fd.minCancelHours) +
-  (apptSection ? `Appointment Types:\n${apptSection}` : "") +
-  line("Other Appointment Type", fd.otherApptType)
-)}${section("Patient Intake",
+  line("Multi-Location", fd.multiLocation ? "Yes" : "No")
+)}${section("Organization — Contacts",
+  line("Form Submitter", s.contact_name) +
+  line("Submitter Role", s.contact_role) +
+  line("Submitter Email", s.email) +
+  line("Submitter Phone", s.phone) +
+  line("Primary Office Manager", fmtContact(fd.pointOfContact)) +
+  line("Billing Contact", fmtContact(fd.billingContact)) +
+  line("Emergency Contact", fmtContact(fd.emergencyContact)) +
+  line("Scheduling Contact", fmtContact(fd.schedulingContact))
+)}${section("Organization — Patient Intake",
   line("Required Intake Fields", intakeList) +
   line("Other Intake Fields", fd.otherIntakeFields) +
   line("Chief Concern Required", fd.chiefConcernRequired === true ? "Yes" : fd.chiefConcernRequired === false ? "No" : "") +
   line("Forms Needed", fd.formsNeeded) +
   line("Referral Requirements", fd.referralRequirements)
-)}${section("Call Handling & Voice",
+)}${section("Organization — Call Handling & Voice",
   line("Voice Gender", fd.voiceGender) +
   line("Languages", langList) +
   line("Other Language", fd.otherLanguage) +
@@ -293,8 +449,8 @@ ${section("Practice Information",
   line("Tone", fd.tone) +
   line("Words to Avoid", fd.wordsToAvoid) +
   line("Words to Use", fd.wordsToUse) +
-  line("Emergency Actions", fd.emergencyActions)
-)}${section("Insurance & Billing",
+  line("Emergency Actions", emergencyActions)
+)}${section("Organization — Insurance & Billing",
   line("Wants Insurance Verification", fd.wantsInsurance === true ? "Yes" : fd.wantsInsurance === false ? "No" : "") +
   line("NPI", fd.npi) +
   line("Provider First Name", fd.providerFirstName) +
@@ -305,7 +461,7 @@ ${section("Practice Information",
   line("Financing Options", fd.financingOptions) +
   line("Consultation Price", fd.consultationPrice) +
   line("Payment Methods", fd.paymentMethods)
-)}${section("FAQs & Policies",
+)}${section("Organization — FAQs & Policies",
   line("Common Questions", fd.commonQuestions) +
   line("Retainer Process", fd.retainerProcess) +
   line("Braces/Aligner FAQs", fd.bracesAlignerFaqs) +
@@ -316,11 +472,12 @@ ${section("Practice Information",
   line("School Excuse Policy", fd.schoolExcusePolicy)
 )}`;
 
+    const safeName = clinicHeading.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-");
     const blob = new Blob([md], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${s.practice_name.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-")}-onboarding.txt`;
+    a.download = `${safeName}-onboarding.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -482,36 +639,40 @@ ${section("Practice Information",
         </div>
       )}
 
-      {/* Submissions Table */}
+      {/* Clinics Table (flattened per-clinic rows) */}
       <div className="mt-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Submissions</h2>
+          <h2 className="text-lg font-semibold">Clinics</h2>
           <div className="flex items-center gap-3">
             <button
               onClick={() => {
-                if (submissions.length === 0) return;
-                const headers = ["Practice Name","PMS","Contact","Email","Office Phone","Insurance","Status","Created","Link"];
-                const rows = submissions.map(s => [
-                  s.practice_name,
-                  s.pms || "",
-                  s.contact_name || "",
-                  s.email || "",
-                  s.office_phone || "",
-                  (s.form_data as Record<string, unknown>)?.wantsInsurance ? "Yes" : "No",
-                  s.status,
-                  new Date(s.created_at).toLocaleDateString(),
-                  window.location.origin + `/onboard/${s.slug}`,
-                ]);
+                if (clinicRows.length === 0) return;
+                const headers = ["Organization","Clinic","Address","Phone","Email","PMS","Insurance","Status","Created","Link"];
+                const rows = clinicRows.map(r => {
+                  const fd = (r.submission.form_data as Record<string, unknown>) || {};
+                  return [
+                    r.submission.practice_name,
+                    r.label,
+                    r.address,
+                    r.phone,
+                    r.email,
+                    r.pms,
+                    fd.wantsInsurance ? "Yes" : "No",
+                    r.submission.status,
+                    new Date(r.submission.created_at).toLocaleDateString(),
+                    window.location.origin + `/onboard/${r.submission.slug}`,
+                  ];
+                });
                 const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
                 const blob = new Blob([csv], { type: "text/csv" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `orthia-submissions-${new Date().toISOString().slice(0, 10)}.csv`;
+                a.download = `orthia-clinics-${new Date().toISOString().slice(0, 10)}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
               }}
-              disabled={submissions.length === 0}
+              disabled={clinicRows.length === 0}
               className="text-sm text-green-600 hover:underline disabled:opacity-50"
             >
               Export CSV
@@ -530,11 +691,12 @@ ${section("Practice Information",
           <table className="w-full text-left text-sm">
             <thead className="border-b bg-gray-50">
               <tr>
-                <th className="px-4 py-3 font-medium">Practice Name</th>
-                <th className="px-4 py-3 font-medium">PMS</th>
-                <th className="px-4 py-3 font-medium">Contact</th>
+                <th className="px-4 py-3 font-medium">Organization</th>
+                <th className="px-4 py-3 font-medium">Clinic</th>
+                <th className="px-4 py-3 font-medium">Address</th>
+                <th className="px-4 py-3 font-medium">Phone</th>
                 <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Office Phone</th>
+                <th className="px-4 py-3 font-medium">PMS</th>
                 <th className="px-4 py-3 font-medium">Insurance</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Created</th>
@@ -542,73 +704,102 @@ ${section("Practice Information",
               </tr>
             </thead>
             <tbody>
-              {submissions.length === 0 && (
+              {clinicRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                     No submissions yet
                   </td>
                 </tr>
               )}
-              {submissions.map((s) => (
-                <tr key={s.id} className="border-b last:border-0">
-                  <td className="px-4 py-3 font-medium">{s.practice_name}</td>
-                  <td className="px-4 py-3">{s.pms || "—"}</td>
-                  <td className="px-4 py-3">{s.contact_name || "—"}</td>
-                  <td className="px-4 py-3">{s.email || "—"}</td>
-                  <td className="px-4 py-3">{s.office_phone || "—"}</td>
-                  <td className="px-4 py-3">
-                    {(s.form_data as Record<string, unknown>)?.wantsInsurance ? (
-                      <span className="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Yes</span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                        s.status === "complete"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-yellow-100 text-yellow-700"
-                      }`}
-                    >
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {new Date(s.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={`/onboard/${s.slug}${s.status === "complete" ? "?view=admin" : ""}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        Open
-                      </a>
-                      <button
-                        onClick={() => navigator.clipboard.writeText(window.location.origin + `/onboard/${s.slug}`)}
-                        className="text-gray-500 hover:text-gray-700 hover:underline"
-                      >
-                        Copy
-                      </button>
-                      <button
-                        onClick={() => handleDownload(s)}
-                        className="text-green-600 hover:text-green-800 hover:underline"
-                      >
-                        Download
-                      </button>
-                      <button
-                        onClick={() => handleDelete(s.id, s.practice_name)}
-                        className="text-red-500 hover:text-red-700 hover:underline"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {clinicRows.map((r, i) => {
+                const s = r.submission;
+                const fd = (s.form_data as Record<string, unknown>) || {};
+                const prev = clinicRows[i - 1];
+                const isFirstOfOrg = !prev || prev.submission.id !== s.id;
+                const isMain = r.clinicIndex === 0;
+                return (
+                  <tr
+                    key={r.clinicKey}
+                    className={`${isFirstOfOrg ? "border-t-2 border-t-gray-200" : "border-t border-t-transparent"} border-b last:border-0 ${isMain ? "" : "bg-gray-50/40"}`}
+                  >
+                    <td className="px-4 py-3 font-medium">
+                      {isFirstOfOrg ? s.practice_name : <span className="text-gray-300">↳</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={isMain ? "font-medium" : "text-gray-700"}>{r.label}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{r.address || "—"}</td>
+                    <td className="px-4 py-3">{r.phone || "—"}</td>
+                    <td className="px-4 py-3">{r.email || "—"}</td>
+                    <td className="px-4 py-3">{r.pms || "—"}</td>
+                    <td className="px-4 py-3">
+                      {isFirstOfOrg ? (
+                        fd.wantsInsurance ? (
+                          <span className="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">Yes</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isFirstOfOrg ? (
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                            s.status === "complete"
+                              ? "bg-green-100 text-green-700"
+                              : "bg-yellow-100 text-yellow-700"
+                          }`}
+                        >
+                          {s.status}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {isFirstOfOrg ? new Date(s.created_at).toLocaleDateString() : ""}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {isFirstOfOrg && (
+                          <>
+                            <a
+                              href={`/onboard/${s.slug}${s.status === "complete" ? "?view=admin" : ""}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              Open
+                            </a>
+                            <button
+                              onClick={() => navigator.clipboard.writeText(window.location.origin + `/onboard/${s.slug}`)}
+                              className="text-gray-500 hover:text-gray-700 hover:underline"
+                            >
+                              Copy
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => handleDownload(s, r.clinicIndex)}
+                          className="text-green-600 hover:text-green-800 hover:underline"
+                        >
+                          Download
+                        </button>
+                        {isFirstOfOrg && (
+                          <button
+                            onClick={() => handleDelete(s.id, s.practice_name)}
+                            className="text-red-500 hover:text-red-700 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
