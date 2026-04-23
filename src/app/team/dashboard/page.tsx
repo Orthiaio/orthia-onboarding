@@ -13,6 +13,7 @@ interface DashboardData {
 const STATUS_LABEL: Record<Status, string> = {
   todo: "To Do",
   in_progress: "In Progress",
+  in_review: "In Review",
   done: "Done",
 };
 const PRIORITY_COLOR: Record<Priority, string> = {
@@ -38,7 +39,7 @@ export default function DashboardPage() {
   }, [data]);
 
   const grouped = useMemo(() => {
-    const g: Record<Status, Task[]> = { todo: [], in_progress: [], done: [] };
+    const g: Record<Status, Task[]> = { todo: [], in_progress: [], in_review: [], done: [] };
     (data?.myTasks || []).forEach((t) => g[t.status].push(t));
     return g;
   }, [data]);
@@ -56,7 +57,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <section className="space-y-6">
-          {(["in_progress", "todo", "done"] as Status[]).map((s) => (
+          {(["in_progress", "in_review", "todo", "done"] as Status[]).map((s) => (
             <div key={s}>
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {STATUS_LABEL[s]} · {grouped[s].length}

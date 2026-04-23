@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
 import { logActivity } from "@/lib/team/activity";
-import type { Priority, Project, Status, Task } from "@/lib/team/types";
+import type { Priority, Project, Status, Task, TaskType } from "@/lib/team/types";
+
+const VALID_STATUS: Status[] = ["todo", "in_progress", "in_review", "done"];
+const VALID_PRIORITY: Priority[] = ["low", "medium", "high"];
+const VALID_TYPE: TaskType[] = ["task", "bug", "story", "epic", "subtask"];
 
 async function getProject(id: number, orgId: number): Promise<Project | null> {
   const { data } = await teamDb
@@ -30,6 +34,9 @@ export async function GET(
   const status = url.searchParams.get("status");
   const assignee = url.searchParams.get("assignee");
   const priority = url.searchParams.get("priority");
+  const sprint = url.searchParams.get("sprint"); // "backlog" → null, number → sprint id, "active" → active sprint, missing → no filter
+  const parent = url.searchParams.get("parent");
+  const type = url.searchParams.get("type");
 
   let q = teamDb
     .from("tt_tasks")
@@ -38,7 +45,26 @@ export async function GET(
     .is("deleted_at", null);
   if (status) q = q.eq("status", status);
   if (priority) q = q.eq("priority", priority);
-  if (assignee) q = q.eq("assignee_id", Number(assignee));
+  if (type) q = q.eq("type", type);
+  if (assignee === "null") q = q.is("assignee_id", null);
+  else if (assignee) q = q.eq("assignee_id", Number(assignee));
+  if (parent === "null") q = q.is("parent_id", null);
+  else if (parent) q = q.eq("parent_id", Number(parent));
+
+  if (sprint === "backlog") {
+    q = q.is("sprint_id", null);
+  } else if (sprint === "active") {
+    const { data: active } = await teamDb
+      .from("tt_sprints")
+      .select("id")
+      .eq("project_id", project.id)
+      .eq("state", "active")
+      .maybeSingle();
+    const a = active as { id: number } | null;
+    q = a ? q.eq("sprint_id", a.id) : q.is("sprint_id", null);
+  } else if (sprint) {
+    q = q.eq("sprint_id", Number(sprint));
+  }
 
   const { data, error } = await q.order("position", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -63,14 +89,11 @@ export async function POST(
   const title = String(body.title || "").trim();
   if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
-  const status: Status = ["todo", "in_progress", "done"].includes(body.status)
-    ? body.status
-    : "todo";
-  const priority: Priority = ["low", "medium", "high"].includes(body.priority)
-    ? body.priority
-    : "medium";
+  const status: Status = VALID_STATUS.includes(body.status) ? body.status : "todo";
+  const priority: Priority = VALID_PRIORITY.includes(body.priority) ? body.priority : "medium";
+  const type: TaskType = VALID_TYPE.includes(body.type) ? body.type : "task";
 
-  // Compute next number in project
+  // Next per-project task number
   const { data: latest } = await teamDb
     .from("tt_tasks")
     .select("number")
@@ -79,7 +102,7 @@ export async function POST(
     .limit(1);
   const nextNumber = (((latest as { number: number }[] | null) ?? [])[0]?.number ?? 0) + 1;
 
-  // Compute next position in the target status column
+  // Next position in the target column
   const { data: posRows } = await teamDb
     .from("tt_tasks")
     .select("position")
@@ -91,7 +114,20 @@ export async function POST(
   const nextPosition =
     (((posRows as { position: number }[] | null) ?? [])[0]?.position ?? -1) + 1;
 
-  const assigneeId = body.assignee_id ? Number(body.assignee_id) : user.id;
+  const assigneeId = body.assignee_id === null ? null : body.assignee_id ? Number(body.assignee_id) : user.id;
+  const reporterId = body.reporter_id === null ? null : body.reporter_id ? Number(body.reporter_id) : user.id;
+  const sprintId = body.sprint_id ? Number(body.sprint_id) : null;
+  const parentId = body.parent_id ? Number(body.parent_id) : null;
+  const storyPoints =
+    typeof body.story_points === "number" && Number.isFinite(body.story_points)
+      ? Math.max(0, Math.floor(body.story_points))
+      : null;
+  const labels = Array.isArray(body.labels)
+    ? body.labels
+        .map((l: unknown) => String(l).trim())
+        .filter((l: string) => l.length > 0)
+        .slice(0, 20)
+    : [];
 
   const { data: task, error } = await teamDb
     .from("tt_tasks")
@@ -102,10 +138,17 @@ export async function POST(
       description: body.description || null,
       status,
       priority,
+      type,
       assignee_id: assigneeId,
+      reporter_id: reporterId,
       creator_id: user.id,
       due_date: body.due_date || null,
+      start_date: body.start_date || null,
       position: nextPosition,
+      sprint_id: sprintId,
+      parent_id: parentId,
+      story_points: storyPoints,
+      labels,
     })
     .select()
     .single();
@@ -114,6 +157,6 @@ export async function POST(
   }
 
   const t = task as Task;
-  await logActivity(t.id, user.id, "created", { status: t.status });
+  await logActivity(t.id, user.id, "created", { status: t.status, type: t.type });
   return NextResponse.json({ task });
 }

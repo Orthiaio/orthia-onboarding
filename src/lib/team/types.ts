@@ -1,6 +1,8 @@
 export type Role = "admin" | "developer" | "viewer";
-export type Status = "todo" | "in_progress" | "done";
+export type Status = "todo" | "in_progress" | "in_review" | "done";
 export type Priority = "low" | "medium" | "high";
+export type TaskType = "task" | "bug" | "story" | "epic" | "subtask";
+export type SprintState = "planned" | "active" | "completed";
 
 export interface Organization {
   id: number;
@@ -36,6 +38,21 @@ export interface Project {
   updated_at: string;
 }
 
+export interface Sprint {
+  id: number;
+  project_id: number;
+  name: string;
+  goal: string | null;
+  state: SprintState;
+  start_date: string | null;
+  end_date: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Task {
   id: number;
   project_id: number;
@@ -44,10 +61,17 @@ export interface Task {
   description: string | null;
   status: Status;
   priority: Priority;
+  type: TaskType;
   assignee_id: number | null;
   creator_id: number;
+  reporter_id: number | null;
   due_date: string | null;
+  start_date: string | null;
   position: number;
+  sprint_id: number | null;
+  parent_id: number | null;
+  story_points: number | null;
+  labels: string[];
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -73,9 +97,16 @@ export interface Activity {
     | "unassigned"
     | "priority_changed"
     | "due_date_changed"
+    | "start_date_changed"
     | "title_changed"
     | "description_changed"
-    | "commented";
+    | "commented"
+    | "sprint_changed"
+    | "story_points_changed"
+    | "labels_changed"
+    | "type_changed"
+    | "reporter_changed"
+    | "parent_changed";
   meta: Record<string, unknown>;
   created_at: string;
 }

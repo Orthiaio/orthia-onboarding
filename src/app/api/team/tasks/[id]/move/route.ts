@@ -23,7 +23,10 @@ export async function POST(
   const body = await req.json();
   const newStatus = body.status as Status;
   const newPosition = Number(body.position);
-  if (!["todo", "in_progress", "done"].includes(newStatus) || Number.isNaN(newPosition)) {
+  if (
+    !["todo", "in_progress", "in_review", "done"].includes(newStatus) ||
+    Number.isNaN(newPosition)
+  ) {
     return NextResponse.json({ error: "Invalid status or position" }, { status: 400 });
   }
 
@@ -53,6 +56,7 @@ export async function POST(
   const byCol: Record<Col, Array<Pick<Task, "id" | "status" | "position">>> = {
     todo: [],
     in_progress: [],
+    in_review: [],
     done: [],
   };
   for (const t of all) byCol[t.status as Col].push(t);
