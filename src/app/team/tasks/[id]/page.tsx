@@ -102,12 +102,17 @@ export default function TaskDetailPage({
   async function sendComment() {
     const body = commentDraft.trim();
     if (!body) return;
-    setCommentDraft("");
-    await fetch(`/api/team/tasks/${id}/comments`, {
+    const res = await fetch(`/api/team/tasks/${id}/comments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body }),
     });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      alert(d.error || "Could not post comment. Please try again.");
+      return; // keep the draft so the user doesn't lose their text
+    }
+    setCommentDraft("");
     load();
   }
 

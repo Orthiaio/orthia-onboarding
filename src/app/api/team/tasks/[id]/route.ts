@@ -3,6 +3,7 @@ import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
 import { describeDbError } from "@/lib/team/db-error";
 import { logActivity } from "@/lib/team/activity";
+import { sprintInProject, userInOrg } from "@/lib/team/validate";
 import type { Priority, Task, TaskType } from "@/lib/team/types";
 
 const VALID_PRIORITY: Priority[] = ["low", "medium", "high"];
@@ -60,6 +61,8 @@ export async function GET(
           .from("tt_tasks")
           .select("id,number,title,status,type")
           .eq("id", task.parent_id)
+          .is("deleted_at", null)
+          .eq("project_id", task.project_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
@@ -111,6 +114,12 @@ export async function PATCH(
   if ("assignee_id" in body) {
     const newAssignee = body.assignee_id === null ? null : Number(body.assignee_id);
     if (newAssignee !== task.assignee_id) {
+      if (!(await userInOrg(newAssignee, user.organization_id))) {
+        return NextResponse.json(
+          { error: "Assignee is not in this organization" },
+          { status: 400 },
+        );
+      }
       patch.assignee_id = newAssignee;
       if (newAssignee === null) {
         await logActivity(task.id, user.id, "unassigned", { from: task.assignee_id });
@@ -122,6 +131,12 @@ export async function PATCH(
   if ("reporter_id" in body) {
     const newReporter = body.reporter_id === null ? null : Number(body.reporter_id);
     if (newReporter !== task.reporter_id) {
+      if (!(await userInOrg(newReporter, user.organization_id))) {
+        return NextResponse.json(
+          { error: "Reporter is not in this organization" },
+          { status: 400 },
+        );
+      }
       patch.reporter_id = newReporter;
       await logActivity(task.id, user.id, "reporter_changed", {
         from: task.reporter_id,
@@ -149,6 +164,12 @@ export async function PATCH(
   if ("sprint_id" in body) {
     const newSprint = body.sprint_id === null ? null : Number(body.sprint_id);
     if (newSprint !== task.sprint_id) {
+      if (!(await sprintInProject(newSprint, task.project_id))) {
+        return NextResponse.json(
+          { error: "Sprint does not belong to this project" },
+          { status: 400 },
+        );
+      }
       patch.sprint_id = newSprint;
       await logActivity(task.id, user.id, "sprint_changed", {
         from: task.sprint_id,
@@ -244,6 +265,15 @@ export async function DELETE(
   const { id } = await params;
   const task = await loadTaskInOrg(Number(id), user.organization_id);
   if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Soft-delete the task and orphan its subtasks so the breadcrumb doesn't
+  // dangle. FK on_delete=set_null only fires on hard delete, so do it manually.
+  const { error: orphanErr } = await teamDb
+    .from("tt_tasks")
+    .update({ parent_id: null })
+    .eq("parent_id", task.id);
+  if (orphanErr)
+    return NextResponse.json({ error: describeDbError(orphanErr) }, { status: 500 });
 
   const { error } = await teamDb
     .from("tt_tasks")

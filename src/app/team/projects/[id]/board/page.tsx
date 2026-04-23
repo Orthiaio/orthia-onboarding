@@ -96,6 +96,11 @@ export default function ProjectBoardPage({
     const source = tasks.find((t) => t.id === taskId);
     if (!source) return;
 
+    // Skip no-op drops (same column + same position).
+    if (source.status === status && source.position === index) return;
+
+    // Snapshot for rollback if the server rejects the move.
+    const prevTasks = tasks;
     setTasks((prev) => {
       const without = prev.filter((t) => t.id !== taskId);
       return [...without, { ...source, status, position: index }];
@@ -106,7 +111,13 @@ export default function ProjectBoardPage({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, position: index }),
     });
-    if (res.ok) load();
+    if (res.ok) {
+      load();
+    } else {
+      setTasks(prevTasks); // rollback
+      const d = await res.json().catch(() => ({}));
+      alert(d.error || "Could not move task. Please try again.");
+    }
   }
 
   async function createTask(status: Status, data: CreateTaskData) {

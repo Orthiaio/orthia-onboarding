@@ -3,6 +3,7 @@ import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
 import { describeDbError } from "@/lib/team/db-error";
 import { logActivity } from "@/lib/team/activity";
+import { sprintInProject, taskInProject, userInOrg } from "@/lib/team/validate";
 import type { Priority, Project, Status, Task, TaskType } from "@/lib/team/types";
 
 const VALID_STATUS: Status[] = ["todo", "in_progress", "in_review", "done"];
@@ -130,34 +131,74 @@ export async function POST(
         .slice(0, 20)
     : [];
 
-  const { data: task, error } = await teamDb
-    .from("tt_tasks")
-    .insert({
-      project_id: project.id,
-      number: nextNumber,
-      title,
-      description: body.description || null,
-      status,
-      priority,
-      type,
-      assignee_id: assigneeId,
-      reporter_id: reporterId,
-      creator_id: user.id,
-      due_date: body.due_date || null,
-      start_date: body.start_date || null,
-      position: nextPosition,
-      sprint_id: sprintId,
-      parent_id: parentId,
-      story_points: storyPoints,
-      labels,
-    })
-    .select()
-    .single();
-  if (error || !task) {
-    return NextResponse.json({ error: error?.message || "Failed" }, { status: 500 });
+  // Cross-org / cross-project pointer validation — reject IDs that point
+  // outside the caller's org or this project.
+  if (!(await sprintInProject(sprintId, project.id))) {
+    return NextResponse.json({ error: "Sprint does not belong to this project" }, { status: 400 });
+  }
+  if (!(await taskInProject(parentId, project.id))) {
+    return NextResponse.json({ error: "Parent task does not belong to this project" }, { status: 400 });
+  }
+  if (!(await userInOrg(assigneeId, user.organization_id))) {
+    return NextResponse.json({ error: "Assignee is not in this organization" }, { status: 400 });
+  }
+  if (!(await userInOrg(reporterId, user.organization_id))) {
+    return NextResponse.json({ error: "Reporter is not in this organization" }, { status: 400 });
   }
 
-  const t = task as Task;
-  await logActivity(t.id, user.id, "created", { status: t.status, type: t.type });
+  // Retry on 23505 (unique_violation on project_id, number). Two concurrent
+  // creates will race the max-number read; the losing writer retries.
+  let task: Task | null = null;
+  let lastErr: { message?: string; code?: string } | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: latest } = await teamDb
+      .from("tt_tasks")
+      .select("number")
+      .eq("project_id", project.id)
+      .order("number", { ascending: false })
+      .limit(1);
+    const nextNumber = (((latest as { number: number }[] | null) ?? [])[0]?.number ?? 0) + 1 + attempt;
+
+    const { data, error } = await teamDb
+      .from("tt_tasks")
+      .insert({
+        project_id: project.id,
+        number: nextNumber,
+        title,
+        description: body.description || null,
+        status,
+        priority,
+        type,
+        assignee_id: assigneeId,
+        reporter_id: reporterId,
+        creator_id: user.id,
+        due_date: body.due_date || null,
+        start_date: body.start_date || null,
+        position: nextPosition,
+        sprint_id: sprintId,
+        parent_id: parentId,
+        story_points: storyPoints,
+        labels,
+      })
+      .select()
+      .single();
+    if (!error && data) {
+      task = data as Task;
+      break;
+    }
+    lastErr = error;
+    if (error?.code !== "23505") break; // only retry on unique violation
+  }
+  if (!task) {
+    return NextResponse.json(
+      { error: describeDbError(lastErr) || "Failed" },
+      { status: 500 },
+    );
+  }
+
+  await logActivity(task.id, user.id, "created", { status: task.status, type: task.type });
+  if (task.assignee_id != null) {
+    await logActivity(task.id, user.id, "assigned", { from: null, to: task.assignee_id });
+  }
   return NextResponse.json({ task });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { requireUser } from "@/lib/team/user-auth";
 import { describeDbError } from "@/lib/team/db-error";
+import { logActivity } from "@/lib/team/activity";
 import type { Sprint } from "@/lib/team/types";
 
 /**
@@ -54,12 +55,30 @@ export async function POST(
     }
   }
 
-  // Move all non-done tasks.
-  await teamDb
+  // Find all non-done tasks in this sprint so we can log per-task activity.
+  const { data: toMove, error: listErr } = await teamDb
     .from("tt_tasks")
-    .update({ sprint_id: moveTo })
+    .select("id")
     .eq("sprint_id", sprint.id)
-    .neq("status", "done");
+    .neq("status", "done")
+    .is("deleted_at", null);
+  if (listErr) return NextResponse.json({ error: describeDbError(listErr) }, { status: 500 });
+  const movedIds = ((toMove ?? []) as { id: number }[]).map((r) => r.id);
+
+  if (movedIds.length > 0) {
+    const { error: moveErr } = await teamDb
+      .from("tt_tasks")
+      .update({ sprint_id: moveTo })
+      .in("id", movedIds);
+    if (moveErr) return NextResponse.json({ error: describeDbError(moveErr) }, { status: 500 });
+
+    // Emit a sprint_changed activity per affected task.
+    await Promise.all(
+      movedIds.map((tid) =>
+        logActivity(tid, user.id, "sprint_changed", { from: sprint.id, to: moveTo }),
+      ),
+    );
+  }
 
   const { data, error } = await teamDb
     .from("tt_sprints")

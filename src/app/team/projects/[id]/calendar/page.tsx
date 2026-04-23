@@ -51,8 +51,12 @@ export default function CalendarPage({
     const byDay = new Map<string, Task[]>();
     for (const t of tasks) {
       if (!t.due_date) continue;
-      if (!byDay.has(t.due_date)) byDay.set(t.due_date, []);
-      byDay.get(t.due_date)!.push(t);
+      // Normalize: slice to YYYY-MM-DD so ISO timestamps ("2026-04-22T00:00:00Z")
+      // and plain dates ("2026-04-22") both bucket into the same day regardless
+      // of the user's timezone.
+      const key = String(t.due_date).slice(0, 10);
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key)!.push(t);
     }
 
     const out: { date: Date; inMonth: boolean; tasks: Task[] }[] = [];

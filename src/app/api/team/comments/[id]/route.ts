@@ -33,6 +33,12 @@ export async function PATCH(
   const { body } = await req.json();
   const text = String(body || "").trim();
   if (!text) return NextResponse.json({ error: "Empty" }, { status: 400 });
+  if (text.length > 10_000) {
+    return NextResponse.json(
+      { error: "Comment is too long (10,000 character max)" },
+      { status: 400 },
+    );
+  }
   const { data, error } = await teamDb
     .from("tt_comments")
     .update({ body: text, updated_at: new Date().toISOString() })

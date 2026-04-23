@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { teamDb } from "@/lib/team/supabase";
 import { canMutateTasks, requireUser } from "@/lib/team/user-auth";
+import { describeDbError } from "@/lib/team/db-error";
 import { logActivity } from "@/lib/team/activity";
 import type { Status, Task } from "@/lib/team/types";
 
@@ -45,11 +46,12 @@ export async function POST(
   const projectId = task.project_id;
 
   // Fetch every non-deleted task in the project, grouped by column, ordered by position.
-  const { data: allRaw } = await teamDb
+  const { data: allRaw, error: allErr } = await teamDb
     .from("tt_tasks")
     .select("id,status,position")
     .eq("project_id", projectId)
     .is("deleted_at", null);
+  if (allErr) return NextResponse.json({ error: describeDbError(allErr) }, { status: 500 });
   const all = (allRaw || []) as Array<Pick<Task, "id" | "status" | "position">>;
 
   type Col = Status;
@@ -79,12 +81,16 @@ export async function POST(
     });
   }
 
-  // Apply updates
+  // Apply updates. Individual failures abort the sequence with a 500 so the
+  // client gets a clear error (previously we swallowed them silently).
   for (const u of updates) {
-    await teamDb
+    const { error: upErr } = await teamDb
       .from("tt_tasks")
       .update({ status: u.status, position: u.position, updated_at: new Date().toISOString() })
       .eq("id", u.id);
+    if (upErr) {
+      return NextResponse.json({ error: describeDbError(upErr) }, { status: 500 });
+    }
   }
 
   if (oldStatus !== newStatus) {
@@ -94,10 +100,11 @@ export async function POST(
     });
   }
 
-  const { data: fresh } = await teamDb
+  const { data: fresh, error: freshErr } = await teamDb
     .from("tt_tasks")
     .select("*")
     .eq("id", task.id)
     .single();
+  if (freshErr) return NextResponse.json({ error: describeDbError(freshErr) }, { status: 500 });
   return NextResponse.json({ task: fresh });
 }

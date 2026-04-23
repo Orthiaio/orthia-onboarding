@@ -287,5 +287,15 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// Support GET so you can hit it from a browser without a POST tool.
-export const GET = POST;
+// GET is intentionally not aliased to POST — it'd be a CSRF vector
+// (a phished admin clicking a link would run the selftest). Use
+// `curl -X POST /api/team/selftest` or fetch() with method POST.
+export async function GET() {
+  return NextResponse.json(
+    {
+      error:
+        "Selftest is POST-only. Run `curl -X POST https://<your-host>/api/team/selftest` with your admin session cookie.",
+    },
+    { status: 405 },
+  );
+}
