@@ -83,6 +83,17 @@ interface Closure {
   label: string;
 }
 
+interface AdditionalLocation {
+  id: string;
+  label: string;
+  address: string;
+  phone: string;
+  email: string;
+  parkingNotes: string;
+  buildingAccess: string;
+  notes: string;
+}
+
 interface LunchConfig {
   [day: string]: { start: string; end: string; noLunch: boolean };
 }
@@ -140,6 +151,14 @@ function defaultLunchHours(): LunchConfig {
 
 function newClosureId(): string {
   return `c_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newLocationId(): string {
+  return `loc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function emptyLocation(): AdditionalLocation {
+  return { id: newLocationId(), label: "", address: "", phone: "", email: "", parkingNotes: "", buildingAccess: "", notes: "" };
 }
 
 function SectionHeader({ number, title }: { number: number; title: string }) {
@@ -297,7 +316,7 @@ function OnboardForm() {
   const [website, setWebsite] = useState("");
   const [address, setAddress] = useState("");
   const [multiLocation, setMultiLocation] = useState(false);
-  const [additionalLocations, setAdditionalLocations] = useState("");
+  const [additionalLocationsList, setAdditionalLocationsList] = useState<AdditionalLocation[]>([]);
   const [parkingNotes, setParkingNotes] = useState("");
   const [buildingAccess, setBuildingAccess] = useState("");
   const [timezone, setTimezone] = useState("");
@@ -339,8 +358,6 @@ function OnboardForm() {
   const [mainProvider, setMainProvider] = useState("");
   const [allowedProviders, setAllowedProviders] = useState("");
   const [ageRestrictions, setAgeRestrictions] = useState("");
-  const [minRescheduleHours, setMinRescheduleHours] = useState("");
-  const [minCancelHours, setMinCancelHours] = useState("");
 
   // Intake
   const [intakeFields, setIntakeFields] = useState<string[]>(["Patient Full Name", "Date of Birth", "Phone", "Email"]);
@@ -410,10 +427,10 @@ function OnboardForm() {
       try {
         const draft = {
           practiceName, dbaName, officePhone, officeEmail, website, address,
-          multiLocation, additionalLocations, parkingNotes, buildingAccess,
+          multiLocation, additionalLocationsList, parkingNotes, buildingAccess,
           timezone, doctorNames, pointOfContact, billingContact, emergencyContact,
           schedulingContact, clinicHours, upcomingClosures, bookingScope, apptTypes, otherApptType,
-          mainProvider, allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
+          mainProvider, allowedProviders, ageRestrictions,
           intakeFields, otherIntakeFields, chiefConcernRequired,
           bookWithoutInsurance, emergencyActions, wordsToAvoid, wordsToUse,
           lunchHours, wantsInsurance, npi, providerFirstName,
@@ -443,7 +460,17 @@ function OnboardForm() {
       if (d.website) setWebsite(d.website);
       if (d.address) setAddress(d.address);
       if (d.multiLocation !== undefined) setMultiLocation(d.multiLocation);
-      if (d.additionalLocations) setAdditionalLocations(d.additionalLocations);
+      if (Array.isArray(d.additionalLocationsList)) {
+        setAdditionalLocationsList(d.additionalLocationsList as AdditionalLocation[]);
+      } else if (typeof d.additionalLocations === "string" && d.additionalLocations.trim()) {
+        // Migrate legacy newline-separated string into one location card per line.
+        const migrated = d.additionalLocations
+          .split("\n")
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+          .map((addr: string) => ({ ...emptyLocation(), address: addr }));
+        if (migrated.length > 0) setAdditionalLocationsList(migrated);
+      }
       if (d.parkingNotes) setParkingNotes(d.parkingNotes);
       if (d.buildingAccess) setBuildingAccess(d.buildingAccess);
       if (d.timezone) setTimezone(d.timezone);
@@ -479,8 +506,6 @@ function OnboardForm() {
       if (d.mainProvider) setMainProvider(d.mainProvider);
       if (d.allowedProviders) setAllowedProviders(d.allowedProviders);
       if (d.ageRestrictions) setAgeRestrictions(d.ageRestrictions);
-      if (d.minRescheduleHours) setMinRescheduleHours(d.minRescheduleHours);
-      if (d.minCancelHours) setMinCancelHours(d.minCancelHours);
       if (d.intakeFields) setIntakeFields(d.intakeFields);
       if (d.otherIntakeFields) setOtherIntakeFields(d.otherIntakeFields);
       if (d.chiefConcernRequired !== undefined) setChiefConcernRequired(d.chiefConcernRequired);
@@ -567,7 +592,17 @@ function OnboardForm() {
           const fd = s.form_data as Record<string, unknown>;
           if (fd.address) setAddress(fd.address as string);
           if (fd.multiLocation) setMultiLocation(fd.multiLocation as boolean);
-          if (fd.additionalLocations) setAdditionalLocations(fd.additionalLocations as string);
+          if (Array.isArray(fd.additionalLocationsList)) {
+            setAdditionalLocationsList(fd.additionalLocationsList as AdditionalLocation[]);
+          } else if (typeof fd.additionalLocations === "string" && (fd.additionalLocations as string).trim()) {
+            // Migrate legacy newline-separated string to one location card per line.
+            const migrated = (fd.additionalLocations as string)
+              .split("\n")
+              .map(s => s.trim())
+              .filter(Boolean)
+              .map(addr => ({ ...emptyLocation(), address: addr }));
+            if (migrated.length > 0) setAdditionalLocationsList(migrated);
+          }
           if (fd.parkingNotes) setParkingNotes(fd.parkingNotes as string);
           if (fd.buildingAccess) setBuildingAccess(fd.buildingAccess as string);
           if (fd.timezone) setTimezone(fd.timezone as string);
@@ -603,8 +638,6 @@ function OnboardForm() {
           if (fd.mainProvider) setMainProvider(fd.mainProvider as string);
           if (fd.allowedProviders) setAllowedProviders(fd.allowedProviders as string);
           if (fd.ageRestrictions) setAgeRestrictions(fd.ageRestrictions as string);
-          if (fd.minRescheduleHours) setMinRescheduleHours(fd.minRescheduleHours as string);
-          if (fd.minCancelHours) setMinCancelHours(fd.minCancelHours as string);
           if (fd.intakeFields) setIntakeFields(fd.intakeFields as string[]);
           if (fd.otherIntakeFields) setOtherIntakeFields(fd.otherIntakeFields as string);
           if (fd.chiefConcernRequired !== undefined) setChiefConcernRequired(fd.chiefConcernRequired as boolean);
@@ -685,10 +718,10 @@ function OnboardForm() {
     setSubmitError("");
 
     const formData = {
-      address, multiLocation, additionalLocations, parkingNotes, buildingAccess,
+      address, multiLocation, additionalLocationsList, parkingNotes, buildingAccess,
       timezone, doctorNames, pointOfContact, billingContact, emergencyContact,
       schedulingContact, clinicHours, upcomingClosures, bookingScope, apptTypes, otherApptType,
-      mainProvider, allowedProviders, ageRestrictions, minRescheduleHours, minCancelHours,
+      mainProvider, allowedProviders, ageRestrictions,
       intakeFields, otherIntakeFields, chiefConcernRequired,
       bookWithoutInsurance, emergencyActions, wordsToAvoid, wordsToUse,
       lunchHours, wantsInsurance, npi, providerFirstName,
@@ -930,9 +963,67 @@ function OnboardForm() {
 
               <Toggle label="Multiple Locations" checked={multiLocation} onChange={setMultiLocation} description="Do you have more than one office location?" />
               {multiLocation && (
-                <Field label="Additional Location Addresses">
-                  <textarea value={additionalLocations} onChange={e => setAdditionalLocations(e.target.value)} rows={3} placeholder="One address per line" className={textareaCls} />
-                </Field>
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <label className="block text-sm font-medium text-gray-700">Additional Locations</label>
+                    <span className="text-xs text-gray-400">One card per location</span>
+                  </div>
+                  <p className="mb-2 text-xs text-gray-500">
+                    Fill in details for each additional location. Anything left blank will default to what you entered above for the main location. Use the notes field for anything else that differs (hours, providers, PMS, etc.) &mdash; we&rsquo;ll refine specifics on the onboarding call.
+                  </p>
+                  <div className="space-y-3 rounded-lg border p-4">
+                    {additionalLocationsList.length === 0 && (
+                      <p className="text-sm text-gray-400">No additional locations added yet.</p>
+                    )}
+                    {additionalLocationsList.map((loc, idx) => (
+                      <div key={loc.id} className="rounded-lg border bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-sm font-medium text-gray-700">Location {idx + 2}</p>
+                          <button
+                            type="button"
+                            onClick={() => setAdditionalLocationsList(prev => prev.filter(x => x.id !== loc.id))}
+                            className="text-xs font-medium text-red-500 hover:text-red-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <Field label="Location Label">
+                            <input type="text" value={loc.label} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, label: e.target.value } : x))} placeholder="e.g., North clinic" className={inputCls} />
+                          </Field>
+                          <Field label="Address" required>
+                            <input type="text" value={loc.address} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, address: e.target.value } : x))} placeholder="123 Main St, City, State ZIP" className={inputCls} required />
+                          </Field>
+                          <Field label="Office Phone">
+                            <input type="tel" value={loc.phone} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, phone: e.target.value } : x))} placeholder="(555) 123-4567" className={inputCls} />
+                          </Field>
+                          <Field label="Office Email">
+                            <input type="email" value={loc.email} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, email: e.target.value } : x))} placeholder="location@practice.com" className={inputCls} />
+                          </Field>
+                          <Field label="Parking Notes">
+                            <input type="text" value={loc.parkingNotes} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, parkingNotes: e.target.value } : x))} placeholder="Free lot behind building..." className={inputCls} />
+                          </Field>
+                          <Field label="Building Access / Suite / Floor">
+                            <input type="text" value={loc.buildingAccess} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, buildingAccess: e.target.value } : x))} placeholder="Suite 200, 2nd floor..." className={inputCls} />
+                          </Field>
+                        </div>
+                        <div className="mt-3">
+                          <Field label="Anything else that differs at this location?">
+                            <textarea value={loc.notes} onChange={e => setAdditionalLocationsList(prev => prev.map(x => x.id === loc.id ? { ...x, notes: e.target.value } : x))} rows={2} placeholder="Hours, providers, PMS differences, etc." className={textareaCls} />
+                          </Field>
+                        </div>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setAdditionalLocationsList(prev => [...prev, emptyLocation()])}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-blue-300 bg-blue-50/50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                      Add another location
+                    </button>
+                  </div>
+                </div>
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1222,14 +1313,6 @@ function OnboardForm() {
               <Field label="Age Restrictions">
                 <input type="text" value={ageRestrictions} onChange={e => setAgeRestrictions(e.target.value)} placeholder="e.g., 7 and older" className={inputCls} />
               </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Min hours to reschedule">
-                  <input type="number" value={minRescheduleHours} onChange={e => setMinRescheduleHours(e.target.value)} placeholder="e.g., 24" className={inputCls} />
-                </Field>
-                <Field label="Min hours to cancel">
-                  <input type="number" value={minCancelHours} onChange={e => setMinCancelHours(e.target.value)} placeholder="e.g., 24" className={inputCls} />
-                </Field>
-              </div>
             </div>
           </section>
 
