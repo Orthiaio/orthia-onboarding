@@ -72,6 +72,8 @@ export interface Task {
   parent_id: number | null;
   story_points: number | null;
   labels: string[];
+  blocked: boolean;
+  blocked_reason: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -108,7 +110,9 @@ export interface Activity {
     | "reporter_changed"
     | "parent_changed"
     | "attachment_added"
-    | "attachment_removed";
+    | "attachment_removed"
+    | "blocker_added"
+    | "blocker_removed";
   meta: Record<string, unknown>;
   created_at: string;
 }

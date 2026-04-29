@@ -345,13 +345,23 @@ function TaskCard({
             {project.key}-{task.number}
           </span>
         </div>
-        <span
-          className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-            PRIORITY_COLORS[task.priority]
-          }`}
-        >
-          {task.priority}
-        </span>
+        <div className="flex items-center gap-1">
+          {task.blocked && (
+            <span
+              title={task.blocked_reason || "Blocked"}
+              className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700"
+            >
+              Blocked
+            </span>
+          )}
+          <span
+            className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              PRIORITY_COLORS[task.priority]
+            }`}
+          >
+            {task.priority}
+          </span>
+        </div>
       </div>
       <a
         href={`/team/tasks/${task.id}`}

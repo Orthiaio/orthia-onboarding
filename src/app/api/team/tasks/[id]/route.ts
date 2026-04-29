@@ -239,6 +239,27 @@ export async function PATCH(
       });
     }
   }
+  if ("blocked" in body || "blocked_reason" in body) {
+    const newBlocked = "blocked" in body ? Boolean(body.blocked) : task.blocked;
+    const rawReason =
+      "blocked_reason" in body ? body.blocked_reason : task.blocked_reason;
+    const newReason =
+      typeof rawReason === "string" ? rawReason.trim().slice(0, 1000) || null : null;
+    const blockedChanged = newBlocked !== task.blocked;
+    const reasonChanged = (newReason ?? null) !== (task.blocked_reason ?? null);
+    if (blockedChanged || reasonChanged) {
+      patch.blocked = newBlocked;
+      patch.blocked_reason = newBlocked ? newReason : null;
+      if (blockedChanged) {
+        await logActivity(
+          task.id,
+          user.id,
+          newBlocked ? "blocker_added" : "blocker_removed",
+          newBlocked && newReason ? { reason: newReason } : {},
+        );
+      }
+    }
+  }
   if ("labels" in body && Array.isArray(body.labels)) {
     const cleaned = body.labels
       .map((l: unknown) => String(l).trim())
