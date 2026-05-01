@@ -31,3 +31,13 @@ create table if not exists public.tt_booth_leads (
 
 create index if not exists tt_booth_leads_org_idx
   on public.tt_booth_leads(organization_id, created_at desc);
+
+-- Match the RLS pattern used by every other tt_* table: enable RLS and
+-- grant a permissive policy. Real authorization is enforced at the API
+-- layer via requireUser + organization_id scoping. Without this, anon
+-- inserts/selects can fail with "permission denied" or "row-level
+-- security policy" depending on the project's default GRANTs.
+alter table public.tt_booth_leads enable row level security;
+do $$ begin
+  create policy "tt all" on public.tt_booth_leads for all using (true) with check (true);
+exception when duplicate_object then null; end $$;
