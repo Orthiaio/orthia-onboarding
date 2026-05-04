@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TeamShell, { useMe } from "../team-shell";
 import type { Project, PublicUser, Task, TimeEntry } from "@/lib/team/types";
 
@@ -29,13 +29,45 @@ export default function TimePage() {
   const [from, setFrom] = useState(() => isoDate(daysAgo(14)));
   const [to, setTo] = useState(() => isoDate(new Date()));
   const [error, setError] = useState<string | null>(null);
+  const [weeklyEntries, setWeeklyEntries] = useState<TimeEntry[]>([]);
 
   const isAdmin = me?.user?.role === "admin";
+
+  // First time we know the user's role, default admins to "Everyone"
+  // so they land on the cross-team view. Track whether the user has
+  // manually toggled scope so we don't clobber their choice on re-render.
+  const userToggledScopeRef = useRef(false);
+  useEffect(() => {
+    if (!me?.user || userToggledScopeRef.current) return;
+    if (me.user.role === "admin") setScope("all");
+  }, [me]);
+
+  function setScopeManual(s: "me" | "all") {
+    userToggledScopeRef.current = true;
+    setScope(s);
+  }
 
   // Keep `to` >= `from` so the filter never silently returns nothing.
   function setFromClamped(v: string) {
     setFrom(v);
     if (v && to && v > to) setTo(v);
+  }
+
+  async function loadWeekly() {
+    if (!isAdmin) {
+      setWeeklyEntries([]);
+      return;
+    }
+    const fromW = isoDate(daysAgo(6)); // last 7 days inclusive
+    const toW = isoDate(new Date());
+    try {
+      const r = await fetch(`/api/team/time?user=all&from=${fromW}&to=${toW}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setWeeklyEntries(d.entries || []);
+    } catch {
+      // non-fatal — main panel still loads
+    }
   }
 
   async function load() {
@@ -76,6 +108,11 @@ export default function TimePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, from, to]);
 
+  useEffect(() => {
+    loadWeekly();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, entries.length]);
+
   const projectById = useMemo(() => {
     const m = new Map<number, Project>();
     projects.forEach((p) => m.set(p.id, p));
@@ -92,6 +129,10 @@ export default function TimePage() {
 
   return (
     <TeamShell title="Time">
+      {isAdmin && (
+        <WeekPanel entries={weeklyEntries} userById={userById} />
+      )}
+
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <label className="block">
@@ -134,7 +175,7 @@ export default function TimePage() {
               {(["me", "all"] as const).map((s) => (
                 <button
                   key={s}
-                  onClick={() => setScope(s)}
+                  onClick={() => setScopeManual(s)}
                   className={`rounded-md px-3 py-1 text-xs font-medium ${
                     scope === s
                       ? "bg-slate-900 text-white"
@@ -672,6 +713,66 @@ function EntryRow({
         </div>
       )}
     </li>
+  );
+}
+
+function WeekPanel({
+  entries,
+  userById,
+}: {
+  entries: TimeEntry[];
+  userById: Map<number, PublicUser>;
+}) {
+  const totals = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const e of entries) m.set(e.user_id, (m.get(e.user_id) || 0) + e.minutes);
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  }, [entries]);
+
+  const grand = totals.reduce((s, [, m]) => s + m, 0);
+
+  // Compute the date label so the heading isn't ambiguous.
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(start.getDate() - 6);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  return (
+    <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Past 7 days · per person
+        </h2>
+        <span className="text-xs text-slate-400">
+          {fmt(start)} – {fmt(today)} · total {formatMinutes(grand)}
+        </span>
+      </div>
+      {totals.length === 0 ? (
+        <p className="mt-3 text-sm italic text-slate-400">
+          No time logged in the past week.
+        </p>
+      ) : (
+        <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
+          {totals.map(([uid, mins]) => {
+            const u = userById.get(uid);
+            return (
+              <li
+                key={uid}
+                className="flex items-center justify-between border-b border-slate-100 py-1 text-sm last:border-b-0"
+              >
+                <span className="truncate text-slate-800">
+                  {u?.name || `User #${uid}`}
+                </span>
+                <span className="font-semibold text-slate-900">
+                  {formatMinutes(mins)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
