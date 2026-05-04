@@ -436,7 +436,7 @@ export default function Home() {
           </a>
           <div className="flex items-center gap-6">
             <a
-              href="/chat-widget"
+              href="/chat-widget.html"
               className="text-sm font-medium text-gray-500 transition hover:text-gray-900"
             >
               Chat Widget
