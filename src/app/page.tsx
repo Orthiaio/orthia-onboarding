@@ -425,7 +425,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t bg-white py-10">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 sm:flex-row">
           <a href="https://orthia.io" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100">
               <img src="/logo.png" alt="Orthia" className="h-6 w-6 object-contain" />
@@ -434,9 +434,17 @@ export default function Home() {
               Orthia <span className="font-light text-gray-400">AI</span>
             </span>
           </a>
-          <p className="text-sm text-gray-400">
-            © {new Date().getFullYear()} Orthia. All rights reserved.
-          </p>
+          <div className="flex items-center gap-6">
+            <a
+              href="/chat-widget"
+              className="text-sm font-medium text-gray-500 transition hover:text-gray-900"
+            >
+              Chat Widget
+            </a>
+            <p className="text-sm text-gray-400">
+              © {new Date().getFullYear()} Orthia. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </main>
