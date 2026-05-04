@@ -1,57 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Widget — Orthia</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f9fafb;
-      color: #111827;
-    }
-    .container {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 5rem 1.5rem;
-    }
-    a.back {
-      color: #2563eb;
-      font-size: 0.875rem;
-      text-decoration: none;
-    }
-    a.back:hover { text-decoration: underline; }
-    h1 {
-      margin-top: 1.5rem;
-      font-size: 1.875rem;
-      font-weight: 700;
-    }
-    p {
-      margin-top: 0.75rem;
-      color: #4b5563;
-      line-height: 1.6;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Widget Test</title>
 </head>
 <body>
-  <div class="container">
-    <a class="back" href="/">← Back to home</a>
-    <h1>Chat Widget</h1>
-    <p>The Orthia AI chat widget is embedded on this page. Look for the chat bubble in the bottom-right corner of the screen.</p>
-  </div>
 
-  <script>
-    window.ChatWidgetConfig = {
-      apiUrl:         'https://testtenant.orthiaai.com',
-      widgetKey:      'zKPLmAgPGRQp40YMWahvjdVWQK7JfWCY6SpQdX0UbCp9FWT3',
-      primaryColor:   '#0ea5e9',
-      title:          'Chat Support',
-      subtitle:       'We reply instantly',
-      welcomeMessage: 'Hi! How can I help you today?',
-    };
-  </script>
-  <script src="https://testtenant.orthiaai.com/widget/chat-widget.iife.js"></script>
+    <h1>Chat Widget Demo</h1>
+
+    <script>
+        window.ChatWidgetConfig = {
+            apiUrl: 'https://testtenant.orthiaai.com',
+            widgetKey: 'zKPLmAgPGRQp40YMWahvjdVWQK7JfWCY6SpQdX0UbCp9FWT3',
+            primaryColor: '#0ea5e9',
+            title: 'Chat Support',
+            subtitle: 'We reply instantly',
+            welcomeMessage: 'Hi! How can I help you today?',
+        };
+    </script>
+
+    <!-- FIX -->
+    <script>
+        window.process = { env: {} };
+    </script>
+
+    <script src="https://testtenant.orthiaai.com/widget/chat-widget.iife.js"></script>
+
 </body>
 </html>
