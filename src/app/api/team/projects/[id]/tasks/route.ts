@@ -193,6 +193,11 @@ export async function POST(
         parent_id: parentId,
         story_points: storyPoints,
         labels,
+        blocked: body.blocked === true,
+        blocked_reason:
+          body.blocked === true && typeof body.blocked_reason === "string"
+            ? body.blocked_reason.trim().slice(0, 1000) || null
+            : null,
       })
       .select()
       .single();
@@ -213,6 +218,11 @@ export async function POST(
   await logActivity(task.id, user.id, "created", { status: task.status, type: task.type });
   if (task.assignee_id != null) {
     await logActivity(task.id, user.id, "assigned", { from: null, to: task.assignee_id });
+  }
+  if (task.blocked) {
+    await logActivity(task.id, user.id, "blocker_added", {
+      reason: task.blocked_reason || undefined,
+    });
   }
   return NextResponse.json({ task });
 }

@@ -44,6 +44,40 @@ interface UnreadResponse {
   unread: number;
 }
 
+function BlockersNavLink() {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/team/blockers")
+        .then((r) => (r.ok ? r.json() : { blockers: [] }))
+        .then((d) => {
+          if (!cancelled) setCount((d.blockers || []).length);
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+  return (
+    <a
+      href="/team/blockers"
+      className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900"
+    >
+      Blockers
+      {count !== null && count > 0 && (
+        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+          {count > 9 ? "9+" : count}
+        </span>
+      )}
+    </a>
+  );
+}
+
 export default function TeamShell({
   children,
   title,
@@ -171,6 +205,7 @@ export default function TeamShell({
               <a href="/team/time" className="text-slate-600 hover:text-slate-900">
                 Time
               </a>
+              <BlockersNavLink />
               <a href="/team/qr" className="text-slate-600 hover:text-slate-900">
                 QR Code
               </a>
