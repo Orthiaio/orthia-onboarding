@@ -6,9 +6,15 @@ import { logActivity } from "@/lib/team/activity";
 import type { Status, Task } from "@/lib/team/types";
 
 /**
- * Move a task to a new status and/or position.
- * Body: { status: Status, position: number }
+ * Move a task to a new status and/or position. Optionally also reassign
+ * sprint_id — used by the board's Backlog column, where dropping a task
+ * clears its sprint, and dragging out assigns it to the current sprint.
+ *
+ * Body: { status: Status, position: number, sprint_id?: number | null }
  * Position is 0-indexed within the destination column.
+ *
+ * If `sprint_id` is omitted, the task's existing sprint is preserved.
+ * If present, it must reference a sprint in the same project (or be null).
  */
 export async function POST(
   req: NextRequest,
@@ -25,7 +31,7 @@ export async function POST(
   const newStatus = body.status as Status;
   const newPosition = Number(body.position);
   if (
-    !["todo", "in_progress", "in_review", "done"].includes(newStatus) ||
+    !["todo", "in_progress", "in_review", "in_uat", "done"].includes(newStatus) ||
     Number.isNaN(newPosition)
   ) {
     return NextResponse.json({ error: "Invalid status or position" }, { status: 400 });
@@ -43,7 +49,36 @@ export async function POST(
   }
 
   const oldStatus = task.status;
+  const oldSprintId = task.sprint_id;
   const projectId = task.project_id;
+
+  // Optional sprint reassignment. `undefined` = no change; `null` = backlog;
+  // number = move into that sprint (must belong to the same project).
+  let newSprintId: number | null | undefined = undefined;
+  if ("sprint_id" in body) {
+    const raw = body.sprint_id;
+    if (raw === null) {
+      newSprintId = null;
+    } else if (typeof raw === "number" || (typeof raw === "string" && raw !== "")) {
+      const candidate = Number(raw);
+      if (!Number.isFinite(candidate)) {
+        return NextResponse.json({ error: "Invalid sprint_id" }, { status: 400 });
+      }
+      const { data: target } = await teamDb
+        .from("tt_sprints")
+        .select("id, project_id")
+        .eq("id", candidate)
+        .maybeSingle();
+      const t = target as { id: number; project_id: number } | null;
+      if (!t || t.project_id !== projectId) {
+        return NextResponse.json(
+          { error: "Sprint does not belong to this project" },
+          { status: 400 },
+        );
+      }
+      newSprintId = candidate;
+    }
+  }
 
   // Fetch every non-deleted task in the project, grouped by column, ordered by position.
   const { data: allRaw, error: allErr } = await teamDb
@@ -59,6 +94,7 @@ export async function POST(
     todo: [],
     in_progress: [],
     in_review: [],
+    in_uat: [],
     done: [],
   };
   for (const t of all) byCol[t.status as Col].push(t);
@@ -84,9 +120,19 @@ export async function POST(
   // Apply updates. Individual failures abort the sequence with a 500 so the
   // client gets a clear error (previously we swallowed them silently).
   for (const u of updates) {
+    const patch: Record<string, unknown> = {
+      status: u.status,
+      position: u.position,
+      updated_at: new Date().toISOString(),
+    };
+    // Only the task being moved gets its sprint reassigned, not the others
+    // whose positions were merely recomputed.
+    if (u.id === task.id && newSprintId !== undefined) {
+      patch.sprint_id = newSprintId;
+    }
     const { error: upErr } = await teamDb
       .from("tt_tasks")
-      .update({ status: u.status, position: u.position, updated_at: new Date().toISOString() })
+      .update(patch)
       .eq("id", u.id);
     if (upErr) {
       return NextResponse.json({ error: describeDbError(upErr) }, { status: 500 });
@@ -97,6 +143,13 @@ export async function POST(
     await logActivity(task.id, user.id, "status_changed", {
       from: oldStatus,
       to: newStatus,
+    });
+  }
+
+  if (newSprintId !== undefined && newSprintId !== oldSprintId) {
+    await logActivity(task.id, user.id, "sprint_changed", {
+      from: oldSprintId,
+      to: newSprintId,
     });
   }
 

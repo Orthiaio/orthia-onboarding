@@ -50,6 +50,11 @@ export async function PATCH(
   }
   if ("start_date" in body) patch.start_date = body.start_date || null;
   if ("end_date" in body) patch.end_date = body.end_date || null;
+  if ("retro_notes" in body) {
+    patch.retro_notes = body.retro_notes
+      ? String(body.retro_notes).slice(0, 50_000)
+      : null;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ sprint });

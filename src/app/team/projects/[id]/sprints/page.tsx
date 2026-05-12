@@ -13,6 +13,8 @@ export default function SprintsPage({
   const me = useMe();
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [completing, setCompleting] = useState<Sprint | null>(null);
+  const [editingRetro, setEditingRetro] = useState<Sprint | null>(null);
   const canEdit = me?.user?.role === "admin" || me?.user?.role === "developer";
 
   async function load() {
@@ -48,21 +50,6 @@ export default function SprintsPage({
     load();
   }
 
-  async function completeSprint(id: number) {
-    if (!confirm("Complete this sprint?")) return;
-    const r = await fetch(`/api/team/sprints/${id}/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moveTo: null }),
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      alert(d.error || "Failed");
-      return;
-    }
-    load();
-  }
-
   async function deleteSprint(id: number) {
     if (!confirm("Delete this sprint?")) return;
     const r = await fetch(`/api/team/sprints/${id}`, { method: "DELETE" });
@@ -71,6 +58,43 @@ export default function SprintsPage({
       alert(d.error || "Failed");
       return;
     }
+    load();
+  }
+
+  async function submitComplete(opts: {
+    moveTo: number | null;
+    retroNotes: string;
+  }) {
+    if (!completing) return;
+    const r = await fetch(`/api/team/sprints/${completing.id}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        moveTo: opts.moveTo,
+        retro_notes: opts.retroNotes.trim() || null,
+      }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || "Failed");
+      return;
+    }
+    setCompleting(null);
+    load();
+  }
+
+  async function saveRetro(sprint: Sprint, retroNotes: string) {
+    const r = await fetch(`/api/team/sprints/${sprint.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ retro_notes: retroNotes.trim() || null }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || "Failed");
+      return;
+    }
+    setEditingRetro(null);
     load();
   }
 
@@ -95,6 +119,7 @@ export default function SprintsPage({
         const points = ts.reduce((sum, t) => sum + (t.story_points ?? 0), 0);
         const done = ts.filter((t) => t.status === "done").length;
         const donePct = ts.length > 0 ? Math.round((done / ts.length) * 100) : 0;
+        const incomplete = ts.length - done;
         return (
           <div key={s.id} className="rounded-xl border border-slate-200 bg-white p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -141,10 +166,18 @@ export default function SprintsPage({
                   )}
                   {s.state === "active" && (
                     <button
-                      onClick={() => completeSprint(s.id)}
+                      onClick={() => setCompleting(s)}
                       className="rounded-md bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-800"
                     >
                       Complete sprint
+                    </button>
+                  )}
+                  {s.state === "completed" && (
+                    <button
+                      onClick={() => setEditingRetro(s)}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {s.retro_notes ? "Edit retro" : "Add retro"}
                     </button>
                   )}
                 </div>
@@ -164,11 +197,220 @@ export default function SprintsPage({
                     style={{ width: `${donePct}%` }}
                   />
                 </div>
+                {s.state === "active" && incomplete > 0 && (
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    {incomplete} task{incomplete === 1 ? "" : "s"} still
+                    incomplete — on completion you can carry them forward or
+                    send them back to the backlog.
+                  </p>
+                )}
+              </div>
+            )}
+            {s.state === "completed" && s.retro_notes && (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Retrospective
+                </h4>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                  {s.retro_notes}
+                </p>
               </div>
             )}
           </div>
         );
       })}
+
+      {completing && (
+        <CompleteSprintModal
+          sprint={completing}
+          incompleteCount={
+            (tasksBySprint.get(completing.id) || []).filter(
+              (t) => t.status !== "done",
+            ).length
+          }
+          plannedSprints={sprints.filter(
+            (x) => x.state === "planned" && x.id !== completing.id,
+          )}
+          onClose={() => setCompleting(null)}
+          onSubmit={submitComplete}
+        />
+      )}
+
+      {editingRetro && (
+        <RetroEditorModal
+          sprint={editingRetro}
+          onClose={() => setEditingRetro(null)}
+          onSubmit={(notes) => saveRetro(editingRetro, notes)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CompleteSprintModal({
+  sprint,
+  incompleteCount,
+  plannedSprints,
+  onClose,
+  onSubmit,
+}: {
+  sprint: Sprint;
+  incompleteCount: number;
+  plannedSprints: Sprint[];
+  onClose: () => void;
+  onSubmit: (opts: { moveTo: number | null; retroNotes: string }) => void;
+}) {
+  // Default: send incomplete tasks to the next planned sprint if one exists,
+  // otherwise to the backlog. Users can override.
+  const nextSprint = plannedSprints[0] ?? null;
+  const [moveTo, setMoveTo] = useState<string>(
+    nextSprint ? String(nextSprint.id) : "",
+  );
+  const [retroNotes, setRetroNotes] = useState("");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+      onClick={onClose}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit({
+            moveTo: moveTo === "" ? null : Number(moveTo),
+            retroNotes,
+          });
+        }}
+        className="max-h-[90vh] w-full max-w-xl space-y-4 overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Complete sprint
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {sprint.name}
+            {incompleteCount > 0
+              ? ` · ${incompleteCount} task${
+                  incompleteCount === 1 ? "" : "s"
+                } not done`
+              : " · all tasks done"}
+          </p>
+        </div>
+
+        {incompleteCount > 0 && (
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600">
+              Move incomplete tasks to
+            </span>
+            <select
+              value={moveTo}
+              onChange={(e) => setMoveTo(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="">Backlog (no sprint)</option>
+              {plannedSprints.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} (planned)
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Done tasks always stay attached to this completed sprint.
+            </p>
+          </label>
+        )}
+
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-600">
+            Sprint retrospective
+          </span>
+          <textarea
+            value={retroNotes}
+            onChange={(e) => setRetroNotes(e.target.value)}
+            rows={6}
+            placeholder={`What went well?\nWhat could improve?\nAction items for next sprint?`}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Optional — you can also add or edit the retro after completing.
+          </p>
+        </label>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Complete sprint
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function RetroEditorModal({
+  sprint,
+  onClose,
+  onSubmit,
+}: {
+  sprint: Sprint;
+  onClose: () => void;
+  onSubmit: (notes: string) => void;
+}) {
+  const [notes, setNotes] = useState(sprint.retro_notes ?? "");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+      onClick={onClose}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit(notes);
+        }}
+        className="max-h-[90vh] w-full max-w-xl space-y-4 overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Sprint retrospective
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">{sprint.name}</p>
+        </div>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={10}
+          placeholder={`What went well?\nWhat could improve?\nAction items for next sprint?`}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          autoFocus
+        />
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="flex-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Save retro
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

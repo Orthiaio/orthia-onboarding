@@ -5,6 +5,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   todo: "To Do",
   in_progress: "In Progress",
   in_review: "In Review",
+  in_uat: "UAT",
   done: "Done",
 };
 
@@ -12,6 +13,7 @@ export const STATUS_ACCENT: Record<Status, string> = {
   todo: "bg-slate-400",
   in_progress: "bg-blue-500",
   in_review: "bg-amber-500",
+  in_uat: "bg-violet-500",
   done: "bg-emerald-500",
 };
 
@@ -19,6 +21,7 @@ export const STATUS_BG: Record<Status, string> = {
   todo: "bg-slate-100 text-slate-700",
   in_progress: "bg-blue-100 text-blue-700",
   in_review: "bg-amber-100 text-amber-700",
+  in_uat: "bg-violet-100 text-violet-700",
   done: "bg-emerald-100 text-emerald-700",
 };
 

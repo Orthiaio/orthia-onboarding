@@ -6,7 +6,7 @@ import { logActivity } from "@/lib/team/activity";
 import { sprintInProject, taskInProject, userInOrg } from "@/lib/team/validate";
 import type { Priority, Project, Status, Task, TaskType } from "@/lib/team/types";
 
-const VALID_STATUS: Status[] = ["todo", "in_progress", "in_review", "done"];
+const VALID_STATUS: Status[] = ["todo", "in_progress", "in_review", "in_uat", "done"];
 const VALID_PRIORITY: Priority[] = ["low", "medium", "high"];
 const VALID_TYPE: TaskType[] = ["task", "bug", "story", "epic", "subtask"];
 

@@ -9,7 +9,10 @@ import type { Sprint } from "@/lib/team/types";
  * Complete an active sprint. Done tasks stay in the completed sprint; everything
  * else moves either to the backlog (default) or to a target sprint if provided.
  *
- * Body: { moveTo?: number | null }  (target sprint id, or null to send to backlog)
+ * Body: {
+ *   moveTo?: number | null,        // target sprint id, or null to send to backlog
+ *   retro_notes?: string | null,   // retrospective captured at sprint close
+ * }
  */
 export async function POST(
   req: NextRequest,
@@ -21,6 +24,10 @@ export async function POST(
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const moveTo: number | null = body?.moveTo ?? null;
+  const retroNotes: string | null =
+    typeof body?.retro_notes === "string" && body.retro_notes.trim()
+      ? body.retro_notes.slice(0, 50_000)
+      : null;
 
   const { data: raw } = await teamDb
     .from("tt_sprints")
@@ -80,13 +87,20 @@ export async function POST(
     );
   }
 
+  const sprintPatch: Record<string, unknown> = {
+    state: "completed",
+    completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  // Only overwrite retro_notes when the caller actually supplied content —
+  // this lets admins edit the retro later via PATCH without clobbering it
+  // by accidentally re-completing.
+  if (retroNotes !== null) {
+    sprintPatch.retro_notes = retroNotes;
+  }
   const { data, error } = await teamDb
     .from("tt_sprints")
-    .update({
-      state: "completed",
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(sprintPatch)
     .eq("id", sprint.id)
     .select()
     .single();

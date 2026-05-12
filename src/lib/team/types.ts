@@ -1,5 +1,5 @@
 export type Role = "admin" | "developer" | "viewer";
-export type Status = "todo" | "in_progress" | "in_review" | "done";
+export type Status = "todo" | "in_progress" | "in_review" | "in_uat" | "done";
 export type Priority = "low" | "medium" | "high";
 export type TaskType = "task" | "bug" | "story" | "epic" | "subtask";
 export type SprintState = "planned" | "active" | "completed";
@@ -50,6 +50,7 @@ export interface Sprint {
   started_at: string | null;
   completed_at: string | null;
   position: number;
+  retro_notes: string | null;
   created_at: string;
   updated_at: string;
 }

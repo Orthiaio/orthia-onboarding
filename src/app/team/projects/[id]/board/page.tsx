@@ -6,8 +6,6 @@ import {
   Avatar,
   LabelChip,
   PRIORITY_COLORS,
-  STATUS_ACCENT,
-  STATUS_LABEL,
   TaskTypeIcon,
 } from "@/lib/team/ui";
 import type {
@@ -20,7 +18,27 @@ import type {
   TaskType,
 } from "@/lib/team/types";
 
-const COLUMNS: Status[] = ["todo", "in_progress", "in_review", "done"];
+// Synthetic column representing tasks that aren't in any sprint.
+// "backlog" is not a Status (statuses live on a task; sprint membership is
+// a separate column). We treat it like a column for board UX only.
+type ColumnKey = "backlog" | Status;
+const COLUMNS: ColumnKey[] = ["backlog", "todo", "in_progress", "in_review", "in_uat", "done"];
+const COLUMN_LABEL: Record<ColumnKey, string> = {
+  backlog: "Backlog",
+  todo: "To Do",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  in_uat: "UAT",
+  done: "Done",
+};
+const COLUMN_ACCENT: Record<ColumnKey, string> = {
+  backlog: "bg-zinc-400",
+  todo: "bg-slate-400",
+  in_progress: "bg-blue-500",
+  in_review: "bg-amber-500",
+  in_uat: "bg-violet-500",
+  done: "bg-emerald-500",
+};
 
 export default function ProjectBoardPage({
   params,
@@ -36,17 +54,20 @@ export default function ProjectBoardPage({
   const [attachmentCounts, setAttachmentCounts] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [filterAssignee, setFilterAssignee] = useState<string>("");
+  // Sprint filter only scopes the status columns (To Do → Done). The Backlog
+  // column always shows sprint_id-null tasks regardless of filter.
   const [filterSprint, setFilterSprint] = useState<string>("active"); // 'active', 'all', 'backlog', or sprint id
-  const [showCreate, setShowCreate] = useState<Status | null>(null);
+  const [showCreate, setShowCreate] = useState<ColumnKey | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
 
   const canEdit = me?.user?.role === "admin" || me?.user?.role === "developer";
 
   async function load() {
     try {
-      const sprintParam = filterSprint === "all" ? "" : `&sprint=${filterSprint}`;
+      // Always fetch every task; we filter client-side so the Backlog column
+      // can show non-sprint tasks alongside the selected sprint's status columns.
       const [pRes, uRes, sRes] = await Promise.all([
-        fetch(`/api/team/projects/${id}/tasks?_=${Date.now()}${sprintParam}`),
+        fetch(`/api/team/projects/${id}/tasks?_=${Date.now()}`),
         fetch(`/api/team/users`),
         fetch(`/api/team/projects/${id}/sprints`),
       ]);
@@ -87,21 +108,48 @@ export default function ProjectBoardPage({
     return m;
   }, [users]);
 
-  const tasksByStatus = useMemo(() => {
-    const out: Record<Status, Task[]> = { todo: [], in_progress: [], in_review: [], done: [] };
+  // Currently-selected sprint id used to scope the status columns. The
+  // Backlog column does not depend on this — it always shows tasks with
+  // sprint_id = null.
+  const scopedSprintId: number | "all" = useMemo(() => {
+    if (filterSprint === "all" || filterSprint === "backlog") return "all";
+    if (filterSprint === "active") {
+      return sprints.find((s) => s.state === "active")?.id ?? "all";
+    }
+    const n = Number(filterSprint);
+    return Number.isFinite(n) ? n : "all";
+  }, [filterSprint, sprints]);
+
+  const tasksByColumn = useMemo(() => {
+    const out: Record<ColumnKey, Task[]> = {
+      backlog: [],
+      todo: [],
+      in_progress: [],
+      in_review: [],
+      in_uat: [],
+      done: [],
+    };
     for (const t of tasks) {
       if (filterAssignee === "null" && t.assignee_id != null) continue;
       if (filterAssignee && filterAssignee !== "null" && String(t.assignee_id ?? "") !== filterAssignee)
         continue;
+      if (t.sprint_id == null) {
+        // Tasks with no sprint always go in the Backlog column regardless
+        // of their status (a backlog item can be marked todo, in_progress, etc.).
+        out.backlog.push(t);
+        continue;
+      }
+      // Status columns only show tasks belonging to the scoped sprint.
+      if (scopedSprintId !== "all" && t.sprint_id !== scopedSprintId) continue;
       out[t.status].push(t);
     }
-    (Object.keys(out) as Status[]).forEach((k) =>
+    (Object.keys(out) as ColumnKey[]).forEach((k) =>
       out[k].sort((a, b) => a.position - b.position),
     );
     return out;
-  }, [tasks, filterAssignee]);
+  }, [tasks, filterAssignee, scopedSprintId]);
 
-  async function handleDrop(status: Status, index: number) {
+  async function handleDrop(col: ColumnKey, index: number) {
     if (dragging === null) return;
     const taskId = dragging;
     setDragging(null);
@@ -109,20 +157,62 @@ export default function ProjectBoardPage({
     const source = tasks.find((t) => t.id === taskId);
     if (!source) return;
 
-    // Skip no-op drops (same column + same position).
-    if (source.status === status && source.position === index) return;
+    // Drop into Backlog: clear sprint, keep current status. Drop into a
+    // status column from Backlog: assign to the currently scoped sprint.
+    // Drop within status columns: just change status.
+    const droppingIntoBacklog = col === "backlog";
+    const droppingIntoStatus = col !== "backlog";
+    const newStatus: Status = droppingIntoBacklog ? source.status : (col as Status);
+
+    let newSprintId: number | null | undefined = undefined;
+    if (droppingIntoBacklog) {
+      newSprintId = null;
+    } else if (droppingIntoStatus && source.sprint_id == null) {
+      // Coming out of backlog. Need a target sprint. Prefer the active
+      // sprint, then the currently filtered sprint, else refuse.
+      const targetSprintId =
+        scopedSprintId !== "all"
+          ? scopedSprintId
+          : sprints.find((s) => s.state === "active")?.id ?? null;
+      if (targetSprintId == null) {
+        alert(
+          "No active sprint to drop into. Start a sprint or pick one from the filter first.",
+        );
+        return;
+      }
+      newSprintId = targetSprintId;
+    }
+
+    // Skip no-op drops (same column + same position + no sprint change).
+    if (
+      source.status === newStatus &&
+      source.position === index &&
+      newSprintId === undefined &&
+      (droppingIntoBacklog ? source.sprint_id == null : true)
+    ) {
+      return;
+    }
 
     // Snapshot for rollback if the server rejects the move.
     const prevTasks = tasks;
     setTasks((prev) => {
       const without = prev.filter((t) => t.id !== taskId);
-      return [...without, { ...source, status, position: index }];
+      const patched: Task = {
+        ...source,
+        status: newStatus,
+        position: index,
+        sprint_id: newSprintId === undefined ? source.sprint_id : newSprintId,
+      };
+      return [...without, patched];
     });
+
+    const payload: Record<string, unknown> = { status: newStatus, position: index };
+    if (newSprintId !== undefined) payload.sprint_id = newSprintId;
 
     const res = await fetch(`/api/team/tasks/${taskId}/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, position: index }),
+      body: JSON.stringify(payload),
     });
     if (res.ok) {
       load();
@@ -133,14 +223,17 @@ export default function ProjectBoardPage({
     }
   }
 
-  async function createTask(status: Status, data: CreateTaskData) {
-    // Auto-attach to current filter sprint if it's a real sprint id.
-    const sprint_id =
-      filterSprint !== "all" && filterSprint !== "backlog" && filterSprint !== "active"
-        ? Number(filterSprint)
-        : filterSprint === "active"
-          ? sprints.find((s) => s.state === "active")?.id ?? null
-          : null;
+  async function createTask(col: ColumnKey, data: CreateTaskData) {
+    // Backlog column → sprint_id null, status defaults to todo.
+    // Status column → assign to current sprint scope (preferring an active
+    // sprint if scope is "all"/"backlog"), keep the column's status.
+    const isBacklog = col === "backlog";
+    const status: Status = isBacklog ? "todo" : (col as Status);
+    const sprint_id: number | null = isBacklog
+      ? null
+      : scopedSprintId !== "all"
+        ? scopedSprintId
+        : sprints.find((s) => s.state === "active")?.id ?? null;
     const res = await fetch(`/api/team/projects/${id}/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -223,9 +316,9 @@ export default function ProjectBoardPage({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {COLUMNS.map((col) => {
-              const list = tasksByStatus[col];
+              const list = tasksByColumn[col];
               return (
                 <div
                   key={col}
@@ -235,9 +328,9 @@ export default function ProjectBoardPage({
                 >
                   <div className="flex items-center justify-between px-3 py-3">
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${STATUS_ACCENT[col]}`} />
+                      <span className={`h-2 w-2 rounded-full ${COLUMN_ACCENT[col]}`} />
                       <span className="text-sm font-semibold text-slate-800">
-                        {STATUS_LABEL[col]}
+                        {COLUMN_LABEL[col]}
                       </span>
                       <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500">
                         {list.length}
@@ -285,16 +378,17 @@ export default function ProjectBoardPage({
 
           {showCreate && (
             <CreateTaskModal
-              status={showCreate}
+              status={showCreate === "backlog" ? "todo" : showCreate}
+              columnLabel={COLUMN_LABEL[showCreate]}
               users={users}
               sprints={sprints}
               defaultAssigneeId={me?.user?.id ?? null}
               defaultSprintId={
-                filterSprint !== "all" && filterSprint !== "backlog" && filterSprint !== "active"
-                  ? Number(filterSprint)
-                  : filterSprint === "active"
-                    ? activeSprint?.id ?? null
-                    : null
+                showCreate === "backlog"
+                  ? null
+                  : scopedSprintId !== "all"
+                    ? scopedSprintId
+                    : activeSprint?.id ?? null
               }
               onClose={() => setShowCreate(null)}
               onSubmit={(d) => createTask(showCreate, d)}
@@ -474,6 +568,7 @@ interface CreateTaskData {
 
 function CreateTaskModal({
   status,
+  columnLabel,
   users,
   sprints,
   defaultAssigneeId,
@@ -482,6 +577,7 @@ function CreateTaskModal({
   onSubmit,
 }: {
   status: Status;
+  columnLabel: string;
   users: PublicUser[];
   sprints: Sprint[];
   defaultAssigneeId: number | null;
@@ -535,7 +631,7 @@ function CreateTaskModal({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">New task</h2>
           <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-            {STATUS_LABEL[status]}
+            {columnLabel}
           </span>
         </div>
         <label className="block">

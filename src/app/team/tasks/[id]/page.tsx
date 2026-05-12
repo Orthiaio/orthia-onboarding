@@ -737,6 +737,7 @@ export default function TaskDetailPage({
                 <option value="todo">To Do</option>
                 <option value="in_progress">In Progress</option>
                 <option value="in_review">In Review</option>
+                <option value="in_uat">UAT</option>
                 <option value="done">Done</option>
               </select>
             ) : (
@@ -1271,6 +1272,7 @@ function prettyStatus(v: unknown): string {
   if (v === "todo") return "To Do";
   if (v === "in_progress") return "In Progress";
   if (v === "in_review") return "In Review";
+  if (v === "in_uat") return "UAT";
   if (v === "done") return "Done";
   return String(v ?? "");
 }

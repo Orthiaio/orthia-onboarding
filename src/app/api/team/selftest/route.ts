@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
 
     // 8. Move task A through all four statuses
     {
-      for (const status of ["in_progress", "in_review", "done"] as const) {
+      for (const status of ["in_progress", "in_review", "in_uat", "done"] as const) {
         const { error } = await teamDb
           .from("tt_tasks")
           .update({ status })
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
       if ((data as { status: string }).status !== "done") {
         throw new Error("status did not end at 'done'");
       }
-      ok("Move Task A through todo → in_progress → in_review → done");
+      ok("Move Task A through todo → in_progress → in_review → in_uat → done");
     }
 
     // 9. Complete Sprint 1 — unfinished tasks (subtask still todo) move to backlog
